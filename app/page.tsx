@@ -47,6 +47,8 @@ export default function Home() {
   const [apiStatus, setApiStatus] = useState("");
   const [googleClientId, setGoogleClientId] = useState("");
   const [dragging, setDragging] = useState(false);
+  const [rendering, setRendering] = useState(false);
+  const renderRecorderRef = useRef<MediaRecorder | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const objectUrlRef = useRef("");
@@ -120,6 +122,136 @@ export default function Home() {
 
   const videoStyle = { transform: `${flip ? "scaleX(-1) " : ""}scale(${1 + zoom / 100})`, filter: `brightness(${1 + brightness / 100}) contrast(${contrast / 100}) saturate(${saturation / 100})`, border: border + "px solid #ffffff" };
 
+  function stopRenderedExport() {
+    if (renderRecorderRef.current && renderRecorderRef.current.state !== "inactive") renderRecorderRef.current.stop();
+  }
+
+  async function exportRenderedVideo() {
+    const video = videoRef.current as (HTMLVideoElement & { captureStream?: () => MediaStream }) | null;
+    if (!video || !videoSource || !video.videoWidth) {
+      setNotice("Video ကို အရင်ဖွင့်ပြီး Preview ထဲမှာ ပေါ်လာအောင် စောင့်ပါ။");
+      return;
+    }
+    if (!("MediaRecorder" in window) || !HTMLCanvasElement.prototype.captureStream) {
+      setNotice("ဒီ Browser မှာ Video Export မထောက်ပံ့ပါ။ Android Chrome နောက်ဆုံးဗားရှင်းနဲ့ စမ်းပါ။");
+      return;
+    }
+    const mimeType = ["video/webm;codecs=vp9,opus", "video/webm;codecs=vp8,opus", "video/webm"].find((type) => MediaRecorder.isTypeSupported(type));
+    if (!mimeType) {
+      setNotice("ဒီ Browser မှာ WebM rendering မထောက်ပံ့ပါ။");
+      return;
+    }
+    const canvas = document.createElement("canvas");
+    const sourceWidth = video.videoWidth || 1280;
+    const sourceHeight = video.videoHeight || 720;
+    const scale = Math.min(1, 1920 / sourceWidth);
+    canvas.width = Math.round(sourceWidth * scale);
+    canvas.height = Math.round(sourceHeight * scale);
+    const ctx = canvas.getContext("2d");
+    if (!ctx) { setNotice("Canvas ကို ဖွင့်မရပါ။"); return; }
+    const canvasStream = canvas.captureStream(30);
+    let sourceStream: MediaStream | null = null;
+    try { sourceStream = video.captureStream ? video.captureStream() : null; } catch { sourceStream = null; }
+    const tracks = [...canvasStream.getVideoTracks(), ...(sourceStream?.getAudioTracks() ?? [])];
+    const outputStream = new MediaStream(tracks);
+    const chunks: BlobPart[] = [];
+    let stopped = false;
+    const lines = subtitleText.split("\\n").map((line) => line.trim()).filter(Boolean);
+    const drawFrame = () => {
+      if (stopped || !renderRecorderRef.current || renderRecorderRef.current.state !== "recording") return;
+      try {
+        const cw = canvas.width, ch = canvas.height;
+        ctx.clearRect(0, 0, cw, ch);
+        ctx.save();
+        ctx.filter = `brightness(${1 + brightness / 100}) contrast(${contrast / 100}) saturate(${saturation / 100})`;
+        ctx.translate(cw / 2, ch / 2);
+        ctx.scale((flip ? -1 : 1) * (1 + zoom / 100), 1 + zoom / 100);
+        ctx.drawImage(video, -cw / 2, -ch / 2, cw, ch);
+        ctx.restore();
+        ctx.filter = "none";
+        if (border > 0) {
+          ctx.strokeStyle = "#ffffff";
+          ctx.lineWidth = border * scale;
+          ctx.strokeRect(0, 0, cw, ch);
+        }
+        const currentLine = lines.length ? lines[Math.min(lines.length - 1, Math.floor(video.currentTime / 4))] : "";
+        if (currentLine) {
+          const fontSize = Math.max(12, subtitle.fontSize * scale);
+          const maxWidth = cw * subtitle.width / 100;
+          const centerX = cw * subtitle.x / 100;
+          const centerY = ch * subtitle.y / 100;
+          ctx.font = `600 ${fontSize}px "${subtitle.font}", sans-serif`;
+          ctx.textAlign = "center";
+          ctx.textBaseline = "middle";
+          const words = currentLine.split("");
+          const wrapped: string[] = [];
+          let line = "";
+          for (const character of words) {
+            const candidate = line + character;
+            if (line && ctx.measureText(candidate).width > maxWidth - 20) { wrapped.push(line); line = character; }
+            else line = candidate;
+          }
+          if (line) wrapped.push(line);
+          const lineHeight = fontSize * 1.4;
+          const boxHeight = Math.max(subtitle.height * ch / 100, wrapped.length * lineHeight + 14);
+          const boxWidth = Math.min(maxWidth, Math.max(...wrapped.map((item) => ctx.measureText(item).width), 40) + 22);
+          ctx.fillStyle = `rgba(0,0,0,${Math.min(0.8, subtitle.blur / 100)})`;
+          ctx.fillRect(centerX - boxWidth / 2, centerY - boxHeight / 2, boxWidth, boxHeight);
+          const startY = centerY - ((wrapped.length - 1) * lineHeight) / 2;
+          wrapped.forEach((text, index) => {
+            const y = startY + index * lineHeight;
+            ctx.lineWidth = Math.max(1, fontSize / 13);
+            ctx.strokeStyle = subtitle.outlineColor;
+            ctx.strokeText(text, centerX, y, maxWidth - 10);
+            ctx.fillStyle = subtitle.textColor;
+            ctx.fillText(text, centerX, y, maxWidth - 10);
+          });
+        }
+      } catch {
+        stopped = true;
+        if (renderRecorderRef.current?.state === "recording") renderRecorderRef.current.stop();
+        setNotice("Video ကို Canvas မှာ ဖတ်မရပါ။ URL မှာ CORS ကန့်သတ်ချက်ရှိနိုင်ပါတယ်။ ကိုယ်ပိုင် Local video file ကို Upload လုပ်ပြီး စမ်းပါ။");
+        return;
+      }
+      requestAnimationFrame(drawFrame);
+    };
+    try {
+      const recorder = new MediaRecorder(outputStream, { mimeType });
+      renderRecorderRef.current = recorder;
+      recorder.ondataavailable = (event) => { if (event.data.size > 0) chunks.push(event.data); };
+      recorder.onerror = () => { stopped = true; setRendering(false); setNotice("Video rendering မအောင်မြင်ပါ။ ဖိုင်အရွယ်အစားသေးသေးနဲ့ ပြန်စမ်းပါ။"); };
+      recorder.onstop = () => {
+        stopped = true;
+        setRendering(false);
+        outputStream.getTracks().forEach((track) => track.stop());
+        if (chunks.length) {
+          const blob = new Blob(chunks, { type: mimeType });
+          const url = URL.createObjectURL(blob);
+          const anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download = (projectName.trim() || "conerzone-recap").replace(/[^a-z0-9\\u1000-\\u109F_-]/gi, "-") + ".webm";
+          document.body.appendChild(anchor);
+          anchor.click();
+          anchor.remove();
+          window.setTimeout(() => URL.revokeObjectURL(url), 5000);
+          setNotice("WebM video export ပြီးပါပြီ။ အသံ track ရရှိမှုက Browser နဲ့ source video ပေါ် မူတည်ပါတယ်။ MP4 လိုအပ်ရင် FFmpeg backend ထပ်ချိတ်ဆက်ရပါမယ်။");
+        }
+        renderRecorderRef.current = null;
+      };
+      if (video.ended || (Number.isFinite(video.duration) && video.currentTime >= video.duration)) video.currentTime = 0;
+      setRendering(true);
+      recorder.start(500);
+      await video.play();
+      requestAnimationFrame(drawFrame);
+      video.addEventListener("ended", () => { if (recorder.state === "recording") recorder.stop(); }, { once: true });
+      setNotice("Video rendering စတင်ပါပြီ။ Video အဆုံးထိ ဖွင့်ပြီးနောက် Download စတင်ပါမယ်။");
+    } catch {
+      setRendering(false);
+      outputStream.getTracks().forEach((track) => track.stop());
+      setNotice("Rendering စတင်မရပါ။ Video ကို Play လုပ်ထားပြီး Browser permission/format ကို စစ်ပါ။");
+    }
+  }
+
   return (
     <main className="studio-shell">
       <aside className="studio-sidebar">
@@ -157,7 +289,7 @@ export default function Home() {
                   {videoSource ? <video ref={videoRef} className="preview-video" src={videoSource} controls playsInline style={videoStyle} onError={() => setVideoError("ဒီ URL ကို Video အဖြစ်ဖွင့်မရပါ။ Direct .mp4/.webm link ကို စမ်းပါ။ CORS သို့မဟုတ် website protection ကြောင့် မရနိုင်ပါ။")} /> : <div className="video-placeholder"><span>▶</span><strong>Your movie preview</strong><small>Local video upload or direct video URL</small></div>}
                   <div className="subtitle-overlay" style={{ left: subtitle.x + "%", top: subtitle.y + "%", width: subtitle.width + "%", minHeight: subtitle.height + "px", transform: "translate(-50%, -50%)", fontSize: subtitle.fontSize + "px", color: subtitle.textColor, fontFamily: subtitle.font + ", sans-serif", textShadow: `-1px -1px 0 ${subtitle.outlineColor}, 1px -1px 0 ${subtitle.outlineColor}, -1px 1px 0 ${subtitle.outlineColor}, 1px 1px 0 ${subtitle.outlineColor}`, backgroundColor: `rgba(0,0,0,${subtitle.blur / 100})`, backdropFilter: `blur(${Math.round(subtitle.blur / 12)}px)`, borderRadius: "6px" }} onPointerDown={(e) => { setDragging(true); e.currentTarget.setPointerCapture(e.pointerId); }} onPointerUp={() => setDragging(false)}>{subtitleText.split("\n")[0] || "မြန်မာစာတန်းထိုး"}</div>
                 </div>
-                <div className="video-inputs"><label className="upload-button">＋ Choose video file<input type="file" accept="video/*" onChange={(e) => selectVideo(e.target.files?.[0])} /></label><div className="url-entry"><input value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="Paste direct video URL..." aria-label="Video URL" /><button className="btn-secondary" onClick={loadVideoUrl}>Load URL</button></div></div>
+                <div className="video-inputs"><label className="upload-button">＋ Choose video file<input type="file" accept="video/*" onChange={(e) => selectVideo(e.target.files?.[0])} /></label><div className="url-entry"><input value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="Paste direct video URL..." aria-label="Video URL" /><button className="btn-secondary" onClick={loadVideoUrl}>Load URL</button></div><button className="btn-primary render-button" onClick={rendering ? stopRenderedExport : exportRenderedVideo} disabled={!videoSource}>{rendering ? "Stop render ■" : "Render WebM video ↗"}</button></div>
                 {videoError && <div className="error-note" role="alert">{videoError}</div>}
                 <div className="small-note">မှတ်ချက် — YouTube/Facebook page link များက direct video file မဟုတ်တဲ့အတွက် အလုပ်မလုပ်နိုင်ပါ။ ကိုယ်ပိုင်/ခွင့်ပြုချက်ရှိတဲ့ video ကို အသုံးပြုပါ။</div>
               </section>
