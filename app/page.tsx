@@ -48,6 +48,7 @@ export default function Home() {
   const [googleClientId, setGoogleClientId] = useState("");
   const [dragging, setDragging] = useState(false);
   const [rendering, setRendering] = useState(false);
+  const [playhead, setPlayhead] = useState(0);
   const renderRecorderRef = useRef<MediaRecorder | null>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -286,8 +287,8 @@ export default function Home() {
             <div className="editor-left">
               <section className="panel preview-panel"><div className="panel-head"><div><div className="kicker">LIVE PREVIEW</div><h2>Video & Subtitles</h2></div><span className="tiny-status">PREVIEW</span></div>
                 <div ref={stageRef} className="video-stage" onPointerMove={moveSubtitle} onPointerUp={() => setDragging(false)} onPointerCancel={() => setDragging(false)}>
-                  {videoSource ? <video ref={videoRef} className="preview-video" src={videoSource} controls playsInline style={videoStyle} onError={() => setVideoError("ဒီ URL ကို Video အဖြစ်ဖွင့်မရပါ။ Direct .mp4/.webm link ကို စမ်းပါ။ CORS သို့မဟုတ် website protection ကြောင့် မရနိုင်ပါ။")} /> : <div className="video-placeholder"><span>▶</span><strong>Your movie preview</strong><small>Local video upload or direct video URL</small></div>}
-                  <div className="subtitle-overlay" style={{ left: subtitle.x + "%", top: subtitle.y + "%", width: subtitle.width + "%", minHeight: subtitle.height + "px", transform: "translate(-50%, -50%)", fontSize: subtitle.fontSize + "px", color: subtitle.textColor, fontFamily: subtitle.font + ", sans-serif", textShadow: `-1px -1px 0 ${subtitle.outlineColor}, 1px -1px 0 ${subtitle.outlineColor}, -1px 1px 0 ${subtitle.outlineColor}, 1px 1px 0 ${subtitle.outlineColor}`, backgroundColor: `rgba(0,0,0,${subtitle.blur / 100})`, backdropFilter: `blur(${Math.round(subtitle.blur / 12)}px)`, borderRadius: "6px" }} onPointerDown={(e) => { setDragging(true); e.currentTarget.setPointerCapture(e.pointerId); }} onPointerUp={() => setDragging(false)}>{subtitleText.split("\n")[0] || "မြန်မာစာတန်းထိုး"}</div>
+                  {videoSource ? <video ref={videoRef} className="preview-video" src={videoSource} controls playsInline style={videoStyle} onTimeUpdate={(e) => setPlayhead(e.currentTarget.currentTime)} onError={() => setVideoError("ဒီ URL ကို Video အဖြစ်ဖွင့်မရပါ။ Direct .mp4/.webm link ကို စမ်းပါ။ CORS သို့မဟုတ် website protection ကြောင့် မရနိုင်ပါ။")} /> : <div className="video-placeholder"><span>▶</span><strong>Your movie preview</strong><small>Local video upload or direct video URL</small></div>}
+                  <div className="subtitle-overlay" style={{ left: subtitle.x + "%", top: subtitle.y + "%", width: subtitle.width + "%", minHeight: subtitle.height + "px", transform: "translate(-50%, -50%)", fontSize: subtitle.fontSize + "px", color: subtitle.textColor, fontFamily: subtitle.font + ", sans-serif", textShadow: `-1px -1px 0 ${subtitle.outlineColor}, 1px -1px 0 ${subtitle.outlineColor}, -1px 1px 0 ${subtitle.outlineColor}, 1px 1px 0 ${subtitle.outlineColor}`, backgroundColor: `rgba(0,0,0,${subtitle.blur / 100})`, backdropFilter: `blur(${Math.round(subtitle.blur / 12)}px)`, borderRadius: "6px" }} onPointerDown={(e) => { setDragging(true); e.currentTarget.setPointerCapture(e.pointerId); }} onPointerUp={() => setDragging(false)}>{subtitleText.split("\n").map((line) => line.trim()).filter(Boolean)[Math.min(Math.max(0, subtitleText.split("\n").map((line) => line.trim()).filter(Boolean).length - 1), Math.floor(playhead / 4))] || "မြန်မာစာတန်းထိုး"}</div>
                 </div>
                 <div className="video-inputs"><label className="upload-button">＋ Choose video file<input type="file" accept="video/*" onChange={(e) => selectVideo(e.target.files?.[0])} /></label><div className="url-entry"><input value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="Paste direct video URL..." aria-label="Video URL" /><button className="btn-secondary" onClick={loadVideoUrl}>Load URL</button></div><button className="btn-primary render-button" onClick={rendering ? stopRenderedExport : exportRenderedVideo} disabled={!videoSource}>{rendering ? "Stop render ■" : "Render WebM video ↗"}</button></div>
                 {videoError && <div className="error-note" role="alert">{videoError}</div>}
@@ -313,14 +314,14 @@ export default function Home() {
                 {voiceMode === "characters" && <label className="field-label">Character voice mapping<select value={characterVoice} onChange={(e) => setCharacterVoice(e.target.value)}><option value="auto">Auto — ဇာတ်ကောင်အလိုက် ခွဲခြားရန်</option><option value="adult">လူကြီးအသံ</option><option value="child">ကလေးအသံ</option><option value="male">ယောကျာ်းအသံ</option><option value="female">မိန်းမအသံ</option><option value="elder">အဖိုး/အဖွားအသံ</option></select></label>}
                 <div className="notice-strip compact"><span>ⓘ</span><p>ဒီနေရာက Voice preference ကိုသာ ရွေးထားတာဖြစ်ပြီး အသံထုတ်ပေးတဲ့ AI API ကို မချိတ်ဆက်ရသေးပါ။</p></div>
               </section>
-              <section className="panel"><div className="panel-head"><div><div className="kicker">VIDEO LOOK</div><h2>Visual adjustments</h2></div></div>
+              <section className="panel"><div className="panel-head"><div><div className="kicker">CREATIVE EDITS</div><h2>Visual adjustments</h2></div></div>
                 <label className="check-row"><input type="checkbox" checked={flip} onChange={(e) => setFlip(e.target.checked)} /> Horizontal flip preview</label>
                 <Range label="Zoom / crop" value={zoom} min={0} max={50} suffix="%" onChange={setZoom} />
                 <Range label="Brightness" value={brightness} min={-50} max={50} suffix="%" onChange={setBrightness} />
                 <Range label="Contrast" value={contrast} min={50} max={150} suffix="%" onChange={setContrast} />
                 <Range label="Saturation" value={saturation} min={0} max={200} suffix="%" onChange={setSaturation} />
                 <Range label="Video border" value={border} min={0} max={12} suffix="px" onChange={setBorder} />
-                <div className="small-note">ဒီ effects တွေက Preview မှာသာ သက်ရောက်ပါတယ်။ MP4 အဖြစ် ပြောင်းထုတ်ဖို့ video-rendering backend လိုအပ်ပါတယ်။</div>
+                <div className="small-note">Flip, Crop, Brightness, Contrast နဲ့ Saturation တို့ကို export ထဲမှာပါ ထည့်ပေးပါတယ်။ ဒီ effects တွေက Copyright Claim ကို ရှောင်နိုင်မယ်လို့ အာမမခံပါ။</div>
               </section>
               {notice && <div className="notice-strip" role="status"><span>✓</span><p>{notice}</p></div>}
             </div>
