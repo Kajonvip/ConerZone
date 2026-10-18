@@ -260,7 +260,7 @@ export default function Home() {
   return (
     <main className="studio-shell">
       <aside className="studio-sidebar">
-        <button className="brand-lockup" onClick={() => setPage("home")}><span className="brand-mark">CZ</span><span><strong>ConerZone</strong><small>MOVIE RECAP STUDIO</small></span></button>
+        <button className="brand-lockup" onClick={() => setPage("home")}><span className="brand-mark"><img className="brand-logo" src="/conerzone-logo.svg" alt="ConerZone logo" /></span><span><strong>ConerZone</strong><small>MOVIE RECAP STUDIO</small></span></button>
         <div className="side-label">WORKSPACE</div>
         <button className={page === "home" ? "nav-item active" : "nav-item"} onClick={() => setPage("home")}><span>⌂</span> Home</button>
         <button className={page === "editor" ? "nav-item active" : "nav-item"} onClick={() => setPage("editor")}><span>▣</span> Recap Studio</button>
@@ -270,7 +270,7 @@ export default function Home() {
       </aside>
 
       <section className="studio-main">
-        <header className="studio-topbar"><div className="mobile-brand"><span className="brand-mark">CZ</span><strong>ConerZone</strong></div><div className="crumb">CONERZONE <span>/</span> {page.toUpperCase()}</div><div className="top-status"><span className="status-dot" /> Project workspace</div></header>
+        <header className="studio-topbar"><div className="mobile-brand"><span className="brand-mark"><img className="brand-logo" src="/conerzone-logo.svg" alt="ConerZone logo" /></span><strong>ConerZone</strong></div><div className="crumb">CONERZONE <span>/</span> {page.toUpperCase()}</div><div className="top-status"><span className="status-dot" /> Project workspace</div></header>
 
         {page === "home" && <div className="page-wrap">
           <div className="welcome-row"><div><div className="kicker">YOUR MOVIE RECAP WORKSPACE</div><h1>Make every story <em>count.</em></h1><p>ဗီဒီယိုတင်ပါ၊ မြန်မာစာတန်းထိုးပြင်ပါ၊ Recap Project ကို စီမံပါ။</p></div><button className="btn-primary" onClick={() => setPage("editor")}>＋ New Recap</button></div>
