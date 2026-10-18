@@ -1,123 +1,218 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
-type View = "discover" | "studio" | "library";
-type StudioTab = "script" | "subtitles" | "export";
+type Page = "home" | "editor" | "history" | "settings";
+type SavedProject = { id: string; title: string; date: string; script: string; subtitles: string; settings: SubtitleSettings };
+type SubtitleSettings = { x: number; y: number; fontSize: number; width: number; height: number; blur: number; textColor: string; outlineColor: string; font: string };
+type VoiceMode = "story" | "dialogue" | "characters";
 
-const films = [
-  { title: "Midnight Protocol", genre: "Thriller · 2025", tone: "blue", tag: "FEATURED", icon: "◈", desc: "One secret. One night. No way back." },
-  { title: "Neon Horizon", genre: "Sci-Fi · 2024", tone: "purple", tag: "SCI-FI", icon: "✦", desc: "The future is closer than it looks." },
-  { title: "Last Kingdom", genre: "Action · 2023", tone: "orange", tag: "ACTION", icon: "⚔", desc: "A forgotten heir returns home." },
-  { title: "Silent Echo", genre: "Mystery · 2025", tone: "teal", tag: "MYSTERY", icon: "◉", desc: "Every silence hides a story." },
-];
+const defaultSubtitle: SubtitleSettings = { x: 50, y: 84, fontSize: 26, width: 82, height: 18, blur: 8, textColor: "#ffffff", outlineColor: "#111111", font: "Noto Sans Myanmar" };
+const initialHistory: SavedProject[] = [];
+
+function downloadFile(filename: string, content: string, type = "text/plain;charset=utf-8") {
+  const blob = new Blob(["\uFEFF", content], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1500);
+}
 
 export default function Home() {
-  const [view, setView] = useState<View>("discover");
-  const [studioTab, setStudioTab] = useState<StudioTab>("script");
+  const [page, setPage] = useState<Page>("home");
   const [projectName, setProjectName] = useState("My Movie Recap");
   const [script, setScript] = useState("");
-  const [subtitleText, setSubtitleText] = useState("");
-  const [search, setSearch] = useState("");
+  const [subtitleText, setSubtitleText] = useState("မြန်မာစာတန်းထိုးကို ဒီနေရာမှာ ပြင်ဆင်နိုင်ပါတယ်။");
+  const [subtitle, setSubtitle] = useState<SubtitleSettings>(defaultSubtitle);
+  const [videoUrl, setVideoUrl] = useState("");
+  const [videoSource, setVideoSource] = useState("");
+  const [videoError, setVideoError] = useState("");
   const [notice, setNotice] = useState("");
+  const [history, setHistory] = useState<SavedProject[]>(initialHistory);
+  const [voiceMode, setVoiceMode] = useState<VoiceMode>("story");
+  const [voiceGender, setVoiceGender] = useState("auto");
+  const [characterVoice, setCharacterVoice] = useState("auto");
+  const [flip, setFlip] = useState(false);
+  const [zoom, setZoom] = useState(21);
+  const [brightness, setBrightness] = useState(0);
+  const [contrast, setContrast] = useState(105);
+  const [saturation, setSaturation] = useState(110);
+  const [border, setBorder] = useState(0);
+  const [apiEndpoint, setApiEndpoint] = useState("");
+  const [apiKey, setApiKey] = useState("");
+  const [apiStatus, setApiStatus] = useState("");
+  const [googleClientId, setGoogleClientId] = useState("");
+  const [dragging, setDragging] = useState(false);
+  const stageRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const objectUrlRef = useRef("");
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem("conerzone-history-v1");
+      if (saved) setHistory(JSON.parse(saved) as SavedProject[]);
+    } catch { /* Ignore invalid browser storage. */ }
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem("conerzone-history-v1", JSON.stringify(history)); } catch { setNotice("Browser storage ပြည့်နေပါတယ်။ Project ကို JSON အဖြစ် Download လုပ်ထားပါ။"); }
+  }, [history]);
+
+  useEffect(() => () => { if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current); }, []);
 
   const wordCount = useMemo(() => script.trim() ? script.trim().split(/\s+/).length : 0, [script]);
-  const filteredFilms = films.filter((film) => (film.title + " " + film.genre).toLowerCase().includes(search.toLowerCase()));
 
-  function downloadFile(filename: string, content: string, type = "text/plain;charset=utf-8") {
-    const blob = new Blob(["\uFEFF", content], { type });
-    const url = URL.createObjectURL(blob);
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = filename;
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-    window.setTimeout(() => URL.revokeObjectURL(url), 1500);
-    setNotice("Download စတင်ပါပြီ။ Downloads folder ကို စစ်ကြည့်ပါ။");
+  function selectVideo(file?: File) {
+    if (!file) return;
+    if (!file.type.startsWith("video/")) { setVideoError("Video ဖိုင်ကိုသာ ရွေးချယ်ပါ။"); return; }
+    if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
+    const objectUrl = URL.createObjectURL(file);
+    objectUrlRef.current = objectUrl;
+    setVideoSource(objectUrl);
+    setVideoUrl("");
+    setVideoError("");
+    setNotice("Video ကို Preview အတွက် ဖွင့်ထားပါတယ်။");
+  }
+
+  function loadVideoUrl() {
+    const value = videoUrl.trim();
+    if (!value || !/^https?:\/\//i.test(value)) { setVideoError("http:// သို့မဟုတ် https:// နဲ့စတဲ့ direct video URL ကို ထည့်ပါ။"); return; }
+    setVideoSource(value);
+    setVideoError("");
+    setNotice("URL ကို Preview မှာ ဖွင့်ရန် ကြိုးစားနေပါတယ်။ Direct video link ဖြစ်ရပါမယ်။");
+  }
+
+  function saveProject() {
+    const item: SavedProject = { id: String(Date.now()), title: projectName.trim() || "Untitled Recap", date: new Date().toLocaleString(), script, subtitles: subtitleText, settings: subtitle };
+    setHistory((old) => [item, ...old.filter((x) => x.title !== item.title)].slice(0, 100));
+    setNotice("Project ကို ဒီ Browser ရဲ့ History မှာ သိမ်းပြီးပါပြီ။");
+  }
+
+  function exportProject(item?: SavedProject) {
+    const project = item ?? { id: String(Date.now()), title: projectName, date: new Date().toLocaleString(), script, subtitles: subtitleText, settings: subtitle };
+    downloadFile((project.title || "conerzone-project").replace(/[^a-z0-9\u1000-\u109F_-]/gi, "-") + ".json", JSON.stringify(project, null, 2), "application/json;charset=utf-8");
+    setNotice("Project JSON Download လုပ်နေပါတယ်။");
   }
 
   function exportSrt() {
     const lines = subtitleText.split("\n").map((line) => line.trim()).filter(Boolean);
-    if (!lines.length) {
-      setNotice("SRT ထုတ်ရန် subtitle စာသားကို အရင်ထည့်ပါ။");
-      return;
-    }
-    const stamp = (seconds: number) => {
-      const h = Math.floor(seconds / 3600).toString().padStart(2, "0");
-      const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, "0");
-      const s = (seconds % 60).toString().padStart(2, "0");
-      return `${h}:${m}:${s},000`;
-    };
+    if (!lines.length) { setNotice("SRT ထုတ်ရန် စာတန်းထိုးစာသား ထည့်ပါ။"); return; }
+    const stamp = (seconds: number) => [Math.floor(seconds / 3600), Math.floor((seconds % 3600) / 60), seconds % 60].map((n) => String(n).padStart(2, "0")).join(":") + ",000";
     const srt = lines.map((line, index) => `${index + 1}\n${stamp(index * 4)} --> ${stamp(index * 4 + 4)}\n${line}`).join("\n\n");
     downloadFile("conerzone-subtitles.srt", srt);
+    setNotice("SRT Download စတင်ပါပြီ။");
   }
 
-  function exportScript() {
-    if (!script.trim()) {
-      setNotice("Download မလုပ်ခင် recap script ကို အရင်ရေးပါ။");
-      return;
-    }
-    downloadFile("conerzone-recap-script.txt", `Project: ${projectName}\n\n${script}`);
+  function updateSubtitle(key: keyof SubtitleSettings, value: string | number) {
+    setSubtitle((old) => ({ ...old, [key]: value }));
   }
+
+  function moveSubtitle(event: React.PointerEvent<HTMLDivElement>) {
+    if (!dragging || !stageRef.current) return;
+    const rect = stageRef.current.getBoundingClientRect();
+    updateSubtitle("x", Math.max(5, Math.min(95, Math.round(((event.clientX - rect.left) / rect.width) * 100))));
+    updateSubtitle("y", Math.max(5, Math.min(95, Math.round(((event.clientY - rect.top) / rect.height) * 100))));
+  }
+
+  const videoStyle = { transform: `${flip ? "scaleX(-1) " : ""}scale(${1 + zoom / 100})`, filter: `brightness(${1 + brightness / 100}) contrast(${contrast / 100}) saturate(${saturation / 100})`, border: border + "px solid #ffffff" };
 
   return (
-    <main className="steam-app">
-      <aside className="side-nav">
-        <a className="brand" href="#" onClick={() => setView("discover")} aria-label="ConerZone home">
-          <span className="brand-symbol">CZ</span>
-          <span className="brand-name">Coner<span>Zone</span><small>MOVIE RECAP STUDIO</small></span>
-        </a>
-        <div className="nav-caption">WORKSPACE</div>
-        <button className={view === "discover" ? "side-link selected" : "side-link"} onClick={() => setView("discover")}><span>⌂</span> Discover</button>
-        <button className={view === "studio" ? "side-link selected" : "side-link"} onClick={() => setView("studio")}><span>✎</span> Recap Studio</button>
-        <button className={view === "library" ? "side-link selected" : "side-link"} onClick={() => setView("library")}><span>▤</span> My Library</button>
-        <div className="side-divider" />
-        <div className="nav-caption">STUDIO TOOLS</div>
-        <button className="side-link" onClick={() => { setView("studio"); setStudioTab("script"); }}><span>✦</span> Script Writer <i>SOON</i></button>
-        <button className="side-link" onClick={() => { setView("studio"); setStudioTab("subtitles"); }}><span>▤</span> Subtitle Maker</button>
-        <button className="side-link" onClick={() => { setView("studio"); setStudioTab("export"); }}><span>⇧</span> Export Center</button>
-        <div className="sidebar-bottom"><span className="online-dot" /><div><strong>Studio Online</strong><small>Starter build · v0.2</small></div></div>
+    <main className="studio-shell">
+      <aside className="studio-sidebar">
+        <button className="brand-lockup" onClick={() => setPage("home")}><span className="brand-mark">CZ</span><span><strong>ConerZone</strong><small>MOVIE RECAP STUDIO</small></span></button>
+        <div className="side-label">WORKSPACE</div>
+        <button className={page === "home" ? "nav-item active" : "nav-item"} onClick={() => setPage("home")}><span>⌂</span> Home</button>
+        <button className={page === "editor" ? "nav-item active" : "nav-item"} onClick={() => setPage("editor")}><span>▣</span> Recap Studio</button>
+        <button className={page === "history" ? "nav-item active" : "nav-item"} onClick={() => setPage("history")}><span>◷</span> History <b>{history.length}</b></button>
+        <button className={page === "settings" ? "nav-item active" : "nav-item"} onClick={() => setPage("settings")}><span>⚙</span> Settings</button>
+        <div className="sidebar-note"><span className="status-dot" /><div><strong>Local Studio</strong><small>Browser-based workspace</small></div></div>
       </aside>
 
-      <section className="content-area">
-        <header className="top-header">
-          <div className="mobile-brand"><span className="brand-symbol">CZ</span><strong>ConerZone</strong></div>
-          <label className="search-box"><span>⌕</span><input aria-label="Search movies" value={search} onChange={(e) => { setSearch(e.target.value); setView("discover"); }} placeholder="Search movies, genres..." /></label>
-          <div className="header-right"><span className="status-pill"><span className="online-dot" /> All systems ready</span><div className="avatar">CZ</div></div>
-        </header>
+      <section className="studio-main">
+        <header className="studio-topbar"><div className="mobile-brand"><span className="brand-mark">CZ</span><strong>ConerZone</strong></div><div className="crumb">CONERZONE <span>/</span> {page.toUpperCase()}</div><div className="top-status"><span className="status-dot" /> Project workspace</div></header>
 
-        {view === "discover" && <div className="page-content">
-          <div className="page-intro"><div><div className="eyebrow">YOUR CINEMATIC WORKSPACE</div><h1>Discover <span>stories.</span></h1><p>Find inspiration. Build your next movie recap.</p></div><button className="primary-button" onClick={() => setView("studio")}>＋ New project</button></div>
-          <section className="hero-banner">
-            <div className="hero-backdrop"><div className="hero-orbit orbit-one" /><div className="hero-orbit orbit-two" /><div className="hero-glyph">▶</div></div>
-            <div className="hero-copy"><span className="feature-label"><span /> THE CREATOR'S EDITION</span><h2>Your next<br /><em>great story</em><br />starts here.</h2><p>One workspace for your recap scripts, subtitles and creative projects.</p><button className="hero-button" onClick={() => setView("studio")}>Open Recap Studio <span>→</span></button></div>
-            <div className="hero-foot"><span>CONERZONE ORIGINAL</span><span>CREATE · EDIT · EXPORT</span></div>
-          </section>
-          <div className="section-heading"><div><div className="eyebrow">PICK YOUR INSPIRATION</div><h2>Explore the collection</h2></div><span className="subtle-count">{filteredFilms.length} titles</span></div>
-          <div className="film-grid">{filteredFilms.map((film) => <article className="film-card" key={film.title} onClick={() => { setProjectName(film.title + " Recap"); setView("studio"); }} role="button" tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") { setProjectName(film.title + " Recap"); setView("studio"); } }}>
-            <div className={"poster poster-" + film.tone}><span className="poster-tag">{film.tag}</span><span className="poster-symbol">{film.icon}</span><div className="poster-title">{film.title}</div><div className="poster-bottom">CZ ORIGINALS</div></div>
-            <div className="film-info"><div><strong>{film.title}</strong><span>{film.genre}</span></div><button aria-label={"Create recap for " + film.title} onClick={(e) => { e.stopPropagation(); setProjectName(film.title + " Recap"); setView("studio"); }}>＋</button></div>
-            <p className="film-desc">{film.desc}</p>
-          </article>)}</div>
-          {filteredFilms.length === 0 && <div className="empty-state">No titles match your search. Try another keyword.</div>}
-          <section className="quick-start"><div className="quick-icon">✎</div><div><strong>Ready to tell the story?</strong><p>Start writing your recap and prepare subtitle files in one place.</p></div><button className="secondary-button" onClick={() => setView("studio")}>Launch Studio →</button></section>
+        {page === "home" && <div className="page-wrap">
+          <div className="welcome-row"><div><div className="kicker">YOUR MOVIE RECAP WORKSPACE</div><h1>Make every story <em>count.</em></h1><p>ဗီဒီယိုတင်ပါ၊ မြန်မာစာတန်းထိုးပြင်ပါ၊ Recap Project ကို စီမံပါ။</p></div><button className="btn-primary" onClick={() => setPage("editor")}>＋ New Recap</button></div>
+          <section className="home-hero"><div className="hero-decoration"><span>▶</span></div><div className="hero-content"><div className="kicker">CONERZONE STUDIO</div><h2>Your story.<br /><em>Your voice.</em></h2><p>Movie Preview, Subtitle Styling နဲ့ Voice Plan တို့ကို Workspace တစ်ခုတည်းမှာ စီမံပါ။</p><button className="btn-primary" onClick={() => setPage("editor")}>Open Recap Studio <span>→</span></button></div><div className="hero-foot"><span>MYANMAR SUBTITLE WORKFLOW</span><span>CREATE · STYLE · SAVE</span></div></section>
+          <div className="section-title"><div><div className="kicker">QUICK ACCESS</div><h2>Studio tools</h2></div></div>
+          <div className="tool-cards">
+            <button className="tool-card" onClick={() => setPage("editor")}><span className="tool-icon">▶</span><strong>Video Preview</strong><p>Local video upload သို့မဟုတ် direct URL ဖြင့် စတင်ပါ။</p><span className="card-link">Open Editor →</span></button>
+            <button className="tool-card" onClick={() => { setPage("editor"); setNotice("Subtitle setting တွေကို အောက်မှာ ချိန်ညှိနိုင်ပါတယ်။"); }}><span className="tool-icon">文</span><strong>Myanmar Subtitles</strong><p>ဖောင့်၊ အရောင်၊ Outline၊ Blur နဲ့ နေရာချထားမှုကို ပြင်ပါ။</p><span className="card-link">Style subtitles →</span></button>
+            <button className="tool-card" onClick={() => setPage("history")}><span className="tool-icon">◷</span><strong>Project History</strong><p>Browser ထဲမှာ သိမ်းထားတဲ့ Recap Project များကို ကြည့်ပါ။</p><span className="card-link">View history →</span></button>
+          </div>
+          <div className="notice-strip"><span>ⓘ</span><p>လက်ရှိဗားရှင်းမှာ Preview၊ Subtitle styling နဲ့ Project history ပါဝင်ပါတယ်။ AI voice generation နဲ့ MP4 rendering ကို API/backend ချိတ်ဆက်ပြီးမှ အသုံးပြုနိုင်ပါမယ်။</p></div>
         </div>}
 
-        {view === "studio" && <div className="page-content">
-          <div className="page-intro"><div><div className="eyebrow">CREATOR WORKSPACE</div><h1>Recap <span>Studio.</span></h1><p>Write your story, prepare subtitles, export your work.</p></div><span className="status-pill"><span className="online-dot" /> Local workspace</span></div>
-          <div className="project-bar"><div className="project-badge">▶</div><label>PROJECT TITLE<input value={projectName} onChange={(e) => setProjectName(e.target.value)} aria-label="Project title" /></label><div className="project-stat"><span>{wordCount}</span><small>words</small></div></div>
-          <div className="studio-panel"><div className="studio-tabs"><button className={studioTab === "script" ? "studio-tab active" : "studio-tab"} onClick={() => setStudioTab("script")}>✎ &nbsp; Recap Script</button><button className={studioTab === "subtitles" ? "studio-tab active" : "studio-tab"} onClick={() => setStudioTab("subtitles")}>▤ &nbsp; Subtitle Maker</button><button className={studioTab === "export" ? "studio-tab active" : "studio-tab"} onClick={() => setStudioTab("export")}>⇧ &nbsp; Export</button></div>
-            {studioTab === "script" && <div className="tool-panel"><div className="tool-title"><div><div className="eyebrow">01 / WRITING ROOM</div><h2>Write your recap</h2></div><span className="mini-pill">{wordCount} words</span></div><p className="tool-help">မြန်မာဘာသာဖြင့် ဇာတ်လမ်းအကျဉ်းကို ဒီနေရာမှာ ရေးသားနိုင်ပါတယ်။</p><textarea value={script} onChange={(e) => setScript(e.target.value)} placeholder="ဒီဇာတ်ကားရဲ့ အစမှာ… ဇာတ်လမ်းအကျဉ်းကို ဒီမှာရေးပါ။" rows={12} /><div className="tool-actions"><button className="secondary-button" onClick={() => { setScript(""); setNotice(""); }}>Clear text</button><button className="primary-button" onClick={exportScript}>Download script ↗</button></div></div>}
-            {studioTab === "subtitles" && <div className="tool-panel"><div className="tool-title"><div><div className="eyebrow">02 / CAPTIONS</div><h2>Subtitle maker</h2></div><span className="mini-pill">SRT export</span></div><p className="tool-help">စာကြောင်းတစ်ကြောင်းစီကို line အသစ်မှာ ရေးပါ။ တစ်ကြောင်းကို ၄ စက္ကန့်စီ သတ်မှတ်ပေးပါတယ်။</p><textarea value={subtitleText} onChange={(e) => setSubtitleText(e.target.value)} placeholder={"ပထမ subtitle စာကြောင်း\nဒုတိယ subtitle စာကြောင်း"} rows={12} /><div className="tool-actions"><button className="secondary-button" onClick={() => setSubtitleText("")}>Clear text</button><button className="primary-button" onClick={exportSrt}>Download .srt ↗</button></div></div>}
-            {studioTab === "export" && <div className="tool-panel"><div className="tool-title"><div><div className="eyebrow">03 / DELIVERY</div><h2>Export center</h2></div><span className="mini-pill">Starter</span></div><div className="export-row"><div className="file-type">TXT</div><div><strong>Recap script</strong><p>Download your written script as a text file.</p></div><button className="secondary-button" onClick={exportScript}>Export</button></div><div className="export-row"><div className="file-type">SRT</div><div><strong>Subtitles</strong><p>Export subtitle lines with basic timestamps.</p></div><button className="secondary-button" onClick={exportSrt}>Export</button></div><div className="feature-notice">AI generation, voice-over, video editing and MP4 rendering are not connected yet. These features need additional implementation.</div></div>}
-            {notice && <div className="inline-notice" role="status">{notice}</div>}
+        {page === "editor" && <div className="page-wrap">
+          <div className="welcome-row"><div><div className="kicker">VIDEO & SUBTITLE WORKSPACE</div><h1>Recap <em>Studio.</em></h1><p>Preview ပေါ်က စာတန်းကို လက်နဲ့ရွှေ့ပြီး စိတ်ကြိုက်ပြင်ဆင်ပါ။</p></div><button className="btn-secondary" onClick={saveProject}>Save Project</button></div>
+          <div className="project-name-row"><label>PROJECT NAME<input value={projectName} onChange={(e) => setProjectName(e.target.value)} /></label><span>{wordCount} script words</span></div>
+          <div className="editor-layout">
+            <div className="editor-left">
+              <section className="panel preview-panel"><div className="panel-head"><div><div className="kicker">LIVE PREVIEW</div><h2>Video & Subtitles</h2></div><span className="tiny-status">PREVIEW</span></div>
+                <div ref={stageRef} className="video-stage" onPointerMove={moveSubtitle} onPointerUp={() => setDragging(false)} onPointerCancel={() => setDragging(false)}>
+                  {videoSource ? <video ref={videoRef} className="preview-video" src={videoSource} controls playsInline style={videoStyle} onError={() => setVideoError("ဒီ URL ကို Video အဖြစ်ဖွင့်မရပါ။ Direct .mp4/.webm link ကို စမ်းပါ။ CORS သို့မဟုတ် website protection ကြောင့် မရနိုင်ပါ။")} /> : <div className="video-placeholder"><span>▶</span><strong>Your movie preview</strong><small>Local video upload or direct video URL</small></div>}
+                  <div className="subtitle-overlay" style={{ left: subtitle.x + "%", top: subtitle.y + "%", width: subtitle.width + "%", minHeight: subtitle.height + "px", transform: "translate(-50%, -50%)", fontSize: subtitle.fontSize + "px", color: subtitle.textColor, fontFamily: subtitle.font + ", sans-serif", textShadow: `-1px -1px 0 ${subtitle.outlineColor}, 1px -1px 0 ${subtitle.outlineColor}, -1px 1px 0 ${subtitle.outlineColor}, 1px 1px 0 ${subtitle.outlineColor}`, backgroundColor: `rgba(0,0,0,${subtitle.blur / 100})`, backdropFilter: `blur(${Math.round(subtitle.blur / 12)}px)`, borderRadius: "6px" }} onPointerDown={(e) => { setDragging(true); e.currentTarget.setPointerCapture(e.pointerId); }} onPointerUp={() => setDragging(false)}>{subtitleText.split("\n")[0] || "မြန်မာစာတန်းထိုး"}</div>
+                </div>
+                <div className="video-inputs"><label className="upload-button">＋ Choose video file<input type="file" accept="video/*" onChange={(e) => selectVideo(e.target.files?.[0])} /></label><div className="url-entry"><input value={videoUrl} onChange={(e) => setVideoUrl(e.target.value)} placeholder="Paste direct video URL..." aria-label="Video URL" /><button className="btn-secondary" onClick={loadVideoUrl}>Load URL</button></div></div>
+                {videoError && <div className="error-note" role="alert">{videoError}</div>}
+                <div className="small-note">မှတ်ချက် — YouTube/Facebook page link များက direct video file မဟုတ်တဲ့အတွက် အလုပ်မလုပ်နိုင်ပါ။ ကိုယ်ပိုင်/ခွင့်ပြုချက်ရှိတဲ့ video ကို အသုံးပြုပါ။</div>
+              </section>
+              <section className="panel script-panel"><div className="panel-head"><div><div className="kicker">RECAP SCRIPT</div><h2>Story notes</h2></div><span className="tiny-status">{wordCount} WORDS</span></div><textarea value={script} onChange={(e) => setScript(e.target.value)} placeholder="ဒီဇာတ်ကားရဲ့ အစမှာ... မြန်မာလို recap script ရေးပါ။" rows={7} /><div className="panel-actions"><button className="btn-secondary" onClick={() => downloadFile("conerzone-script.txt", script)}>Download TXT</button><button className="btn-primary" onClick={() => downloadFile("conerzone-project.json", JSON.stringify({ projectName, script, subtitleText, subtitle }, null, 2), "application/json")}>Export Project JSON</button></div></section>
+            </div>
+            <div className="editor-right">
+              <section className="panel"><div className="panel-head"><div><div className="kicker">SUBTITLE DESIGN</div><h2>Text appearance</h2></div></div>
+                <label className="field-label">Subtitle text<textarea className="compact-textarea" value={subtitleText} onChange={(e) => setSubtitleText(e.target.value)} rows={3} /></label>
+                <label className="field-label">Myanmar font<select value={subtitle.font} onChange={(e) => updateSubtitle("font", e.target.value)}><option>Noto Sans Myanmar</option><option>Myanmar Text</option><option>Padauk</option></select></label>
+                <div className="two-fields"><label className="field-label">Text color<input type="color" value={subtitle.textColor} onChange={(e) => updateSubtitle("textColor", e.target.value)} /></label><label className="field-label">Outline color<input type="color" value={subtitle.outlineColor} onChange={(e) => updateSubtitle("outlineColor", e.target.value)} /></label></div>
+                <Range label="Font size" value={subtitle.fontSize} min={12} max={56} suffix="px" onChange={(v) => updateSubtitle("fontSize", v)} />
+                <Range label="Subtitle width" value={subtitle.width} min={25} max={100} suffix="%" onChange={(v) => updateSubtitle("width", v)} />
+                <Range label="Container height" value={subtitle.height} min={0} max={80} suffix="px" onChange={(v) => updateSubtitle("height", v)} />
+                <Range label="Blur container" value={subtitle.blur} min={0} max={100} suffix="%" onChange={(v) => updateSubtitle("blur", v)} />
+                <div className="position-controls"><Range label="Horizontal position" value={subtitle.x} min={5} max={95} suffix="%" onChange={(v) => updateSubtitle("x", v)} /><Range label="Vertical position" value={subtitle.y} min={5} max={95} suffix="%" onChange={(v) => updateSubtitle("y", v)} /></div>
+                <div className="small-note">Preview ပေါ်က စာတန်းကို ဖိဆွဲရွှေ့နိုင်သလို slider နဲ့လည်း ချိန်နိုင်ပါတယ်။</div>
+              </section>
+              <section className="panel"><div className="panel-head"><div><div className="kicker">VOICE PLANNER</div><h2>Myanmar voice style</h2></div><span className="tiny-status">SETUP</span></div>
+                <label className="field-label">Speaking format<select value={voiceMode} onChange={(e) => setVoiceMode(e.target.value as VoiceMode)}><option value="story">Storytelling — ဇာတ်ကြောင်းပြော</option><option value="dialogue">Dialogue — အပြန်အလှန်ပြော</option><option value="characters">Character voices — ဇာတ်ကောင်အလိုက်</option></select></label>
+                <label className="field-label">Narrator voice<select value={voiceGender} onChange={(e) => setVoiceGender(e.target.value)}><option value="auto">Auto — အလိုအလျောက်</option><option value="male">ယောကျာ်းအသံ</option><option value="female">မိန်းမအသံ</option></select></label>
+                {voiceMode === "characters" && <label className="field-label">Character voice mapping<select value={characterVoice} onChange={(e) => setCharacterVoice(e.target.value)}><option value="auto">Auto — ဇာတ်ကောင်အလိုက် ခွဲခြားရန်</option><option value="adult">လူကြီးအသံ</option><option value="child">ကလေးအသံ</option><option value="male">ယောကျာ်းအသံ</option><option value="female">မိန်းမအသံ</option><option value="elder">အဖိုး/အဖွားအသံ</option></select></label>}
+                <div className="notice-strip compact"><span>ⓘ</span><p>ဒီနေရာက Voice preference ကိုသာ ရွေးထားတာဖြစ်ပြီး အသံထုတ်ပေးတဲ့ AI API ကို မချိတ်ဆက်ရသေးပါ။</p></div>
+              </section>
+              <section className="panel"><div className="panel-head"><div><div className="kicker">VIDEO LOOK</div><h2>Visual adjustments</h2></div></div>
+                <label className="check-row"><input type="checkbox" checked={flip} onChange={(e) => setFlip(e.target.checked)} /> Horizontal flip preview</label>
+                <Range label="Zoom / crop" value={zoom} min={0} max={50} suffix="%" onChange={setZoom} />
+                <Range label="Brightness" value={brightness} min={-50} max={50} suffix="%" onChange={setBrightness} />
+                <Range label="Contrast" value={contrast} min={50} max={150} suffix="%" onChange={setContrast} />
+                <Range label="Saturation" value={saturation} min={0} max={200} suffix="%" onChange={setSaturation} />
+                <Range label="Video border" value={border} min={0} max={12} suffix="px" onChange={setBorder} />
+                <div className="small-note">ဒီ effects တွေက Preview မှာသာ သက်ရောက်ပါတယ်။ MP4 အဖြစ် ပြောင်းထုတ်ဖို့ video-rendering backend လိုအပ်ပါတယ်။</div>
+              </section>
+              {notice && <div className="notice-strip" role="status"><span>✓</span><p>{notice}</p></div>}
+            </div>
           </div>
         </div>}
 
-        {view === "library" && <div className="page-content"><div className="page-intro"><div><div className="eyebrow">YOUR WORK IN PROGRESS</div><h1>My <span>Library.</span></h1><p>Start a project from your own movie idea.</p></div><button className="primary-button" onClick={() => setView("studio")}>＋ New project</button></div><div className="library-empty"><div className="library-empty-icon">▤</div><h2>Your library starts here.</h2><p>Your projects are not saved between browser sessions yet. Start a recap and download your work to keep it safe.</p><button className="primary-button" onClick={() => setView("studio")}>Create first recap →</button></div></div>}
-        <footer className="site-footer"><span>© 2026 CONERZONE STUDIO</span><span>Built for stories worth telling.</span></footer>
+        {page === "history" && <div className="page-wrap"><div className="welcome-row"><div><div className="kicker">SAVED PROJECTS</div><h1>Project <em>History.</em></h1><p>ဒီ Browser မှာ သိမ်းထားတဲ့ Recap Project များကို ပြန်ဖွင့်ပြီး Download လုပ်ပါ။</p></div><button className="btn-primary" onClick={() => setPage("editor")}>＋ New Recap</button></div>
+          {history.length === 0 ? <div className="empty-panel"><span>◷</span><h2>History မရှိသေးပါ</h2><p>Recap Studio ထဲက Save Project ကို နှိပ်ပြီး ဒီနေရာမှာ သိမ်းထားနိုင်ပါတယ်။</p><button className="btn-primary" onClick={() => setPage("editor")}>Open Studio</button></div> : <div className="history-list">{history.map((item) => <article className="history-item" key={item.id}><div className="history-thumb">▶</div><div className="history-info"><strong>{item.title}</strong><span>{item.date}</span><small>{item.script.length} script characters · {item.subtitles.split("\n").filter(Boolean).length} subtitle lines</small></div><div className="history-actions"><button className="btn-secondary" onClick={() => exportProject(item)}>Download JSON</button><button className="btn-secondary danger-button" onClick={() => setHistory((old) => old.filter((x) => x.id !== item.id))}>Delete</button></div></article>)}</div>}
+          <div className="notice-strip"><span>ⓘ</span><p>History ကို လက်ရှိ Browser ရဲ့ local storage မှာ သိမ်းပါတယ်။ Browser data ရှင်းလိုက်ရင် ပျောက်နိုင်လို့ JSON backup ကို Download လုပ်ထားပါ။</p></div>
+        </div>}
+
+        {page === "settings" && <div className="page-wrap"><div className="welcome-row"><div><div className="kicker">STUDIO PREFERENCES</div><h1>Studio <em>Settings.</em></h1><p>API ချိတ်ဆက်မှုနဲ့ project workflow ကို စီမံပါ။</p></div></div>
+          <section className="settings-card"><div className="panel-head"><div><div className="kicker">AI CONNECTION</div><h2>Custom API</h2></div><span className="tiny-status">NOT CONNECTED</span></div><p className="settings-desc">သင့် AI service ရဲ့ API endpoint နဲ့ key ကို သတ်မှတ်နိုင်ပါတယ်။ လုံခြုံရေးအတွက် API key ကို browser ထဲမှာ မသိမ်းပါ။</p><label className="field-label">API endpoint URL<input value={apiEndpoint} onChange={(e) => setApiEndpoint(e.target.value)} placeholder="https://your-api.example.com/v1" /></label><label className="field-label">API key<input type="password" value={apiKey} onChange={(e) => setApiKey(e.target.value)} placeholder="Paste API key for this session only" autoComplete="off" /></label><button className="btn-primary" onClick={() => setApiStatus(apiEndpoint.startsWith("https://") && apiKey.trim() ? "Endpoint နဲ့ key ထည့်ထားပါတယ်။ တကယ့် connection test အတွက် backend/API adapter ထပ်တည်ဆောက်ရန် လိုပါတယ်။" : "HTTPS API endpoint နဲ့ API key ကို အရင်ထည့်ပါ။")}>Check setup</button>{apiStatus && <div className="notice-strip"><span>ⓘ</span><p>{apiStatus}</p></div>}</section>
+          <section className="settings-card"><div className="panel-head"><div><div className="kicker">GOOGLE ACCOUNT</div><h2>Google connection</h2></div><span className="tiny-status">NOT CONNECTED</span></div><p className="settings-desc">Google OAuth ချိတ်ဆက်ဖို့ Google Cloud မှာ OAuth Client ID၊ redirect URL နဲ့ server-side callback တို့ကို သတ်မှတ်ရပါမယ်။</p><label className="field-label">Google OAuth Client ID<input value={googleClientId} onChange={(e) => setGoogleClientId(e.target.value)} placeholder="your-client-id.apps.googleusercontent.com" /></label><button className="btn-secondary" onClick={() => setApiStatus(googleClientId.trim() ? "Client ID ထည့်ထားပါတယ်။ Google OAuth flow မတည်ဆောက်ရသေးလို့ account မချိတ်ဆက်သေးပါ။" : "Google Cloud Console မှ OAuth Client ID ကို အရင်ရယူပါ။")}>Configure Google</button></section>
+          <section className="settings-card"><div className="panel-head"><div><div className="kicker">LOCAL STORAGE</div><h2>Project backup</h2></div></div><p className="settings-desc">History project {history.length} ခု ရှိပါတယ်။ JSON backup တစ်ခုအဖြစ် သိမ်းထားပါ။</p><button className="btn-secondary" onClick={() => downloadFile("conerzone-history-backup.json", JSON.stringify(history, null, 2), "application/json")}>Download history backup</button></section>
+          <div className="notice-strip"><span>ⓘ</span><p>API key ကို public frontend ထဲမှာ hard-code မလုပ်ပါနဲ့။ တကယ့် AI API ချိတ်ဆက်ရာမှာ server-side environment variables နဲ့ backend route ကို အသုံးပြုရပါမယ်။</p></div>
+        </div>}
+
+        <footer className="studio-footer"><span>© 2026 CONERZONE</span><span>Made for stories worth telling.</span></footer>
       </section>
     </main>
   );
+}
+
+function Range({ label, value, min, max, suffix, onChange }: { label: string; value: number; min: number; max: number; suffix: string; onChange: (value: number) => void }) {
+  return <label className="range-field"><span><span>{label}</span><b>{value}{suffix}</b></span><input type="range" min={min} max={max} value={value} onChange={(e) => onChange(Number(e.target.value))} /></label>;
 }
