@@ -25,9 +25,9 @@ export default function Home() {
     <main className="site-shell">
       <header className="topbar">
         <a className="brand" href="#" aria-label="ConerZone home"><span className="brand-mark">C<span>Z</span></span><span>CONER<span className="brand-accent">ZONE</span></span></a>
-        <nav className="topnav"><a className="active" href="#home">Home</a><a href="#browse">Movies</a><a href="#browse">Series</a><a href="#browse">My List</a></nav>
+        <nav className="topnav"><a className="active" href="#home">Home</a><a href="#browse">Movies</a><a href="#browse">Series</a><a href="#browse">My List</a><a href="/editor">Editor</a></nav>
         <label className="searchbox"><span>⌕</span><input aria-label="Search movies" placeholder="Search movies..." value={query} onChange={(event) => setQuery(event.target.value)} /></label>
-        <button className="avatar" aria-label="Profile">K</button>
+        <a className="avatar editor-home-link" href="/editor" aria-label="Open video editor" title="Open Video Editor">✦</a>
       </header>
 
       <section className="hero" id="home">
