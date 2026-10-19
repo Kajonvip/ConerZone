@@ -1,6 +1,8 @@
 "use client";
 
+import "./editor.css";
 import { ChangeEvent, CSSProperties, PointerEvent as ReactPointerEvent, useCallback, useEffect, useRef, useState } from "react";
+
 
 type Overlay = { x: number; y: number; width: number; height: number };
 type SavedProject = {
