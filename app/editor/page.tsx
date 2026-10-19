@@ -79,6 +79,7 @@ export default function EditorPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [notice, setNotice] = useState("ဖိုင်တင်ပြီး စတင်တည်းဖြတ်နိုင်ပါပြီ။");
   const [busy, setBusy] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
   const [selectedOverlay, setSelectedOverlay] = useState<"subtitle" | "blur">("subtitle");
   const [language, setLanguage] = useState<"my" | "en">("my");
 
@@ -227,6 +228,48 @@ export default function EditorPage() {
     } finally { event.target.value = ""; }
   };
 
+  const exportVideo = async () => {
+    if (!videoUrl) {
+      setNotice("Export မလုပ်မီ video ဖိုင်ကို အရင်ရွေးပါ။");
+      return;
+    }
+    setBusy(true);
+    setExportProgress(0);
+    setNotice("FFmpeg engine ကို စတင်ပြင်ဆင်နေပါတယ်။ ပထမအကြိမ်တွင် အချိန်ယူနိုင်ပါတယ်။");
+    try {
+      const { FFmpeg } = await import("@ffmpeg/ffmpeg");
+      const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
+      const ffmpeg = new FFmpeg();
+      ffmpeg.on("progress", ({ progress }) => setExportProgress(Math.max(0, Math.min(100, Math.round(progress * 100)))));
+      const coreBase = "https://unpkg.com/@ffmpeg/core@0.12.10/dist/umd";
+      await ffmpeg.load({
+        coreURL: await toBlobURL(`${coreBase}/ffmpeg-core.js`, "text/javascript"),
+        wasmURL: await toBlobURL(`${coreBase}/ffmpeg-core.wasm`, "application/wasm")
+      });
+      const extension = fileName.match(/\.([a-zA-Z0-9]+)$/)?.[1]?.toLowerCase() || "mp4";
+      const inputName = `source.${extension}`;
+      await ffmpeg.writeFile(inputName, await fetchFile(videoUrl));
+      setNotice("MP4 ကို render လုပ်နေပါတယ်…");
+      await ffmpeg.exec(["-i", inputName, "-c:v", "libx264", "-preset", "ultrafast", "-crf", "23", "-c:a", "aac", "-movflags", "+faststart", "conerzone-export.mp4"]);
+      const data = await ffmpeg.readFile("conerzone-export.mp4");
+      const output = new Blob([data as BlobPart], { type: "video/mp4" });
+      const url = URL.createObjectURL(output);
+      const anchor = document.createElement("a");
+      anchor.href = url;
+      anchor.download = `${project.name || "conerzone"}-export.mp4`;
+      anchor.click();
+      URL.revokeObjectURL(url);
+      await ffmpeg.terminate();
+      setExportProgress(100);
+      setNotice("MP4 export ပြီးပါပြီ။ လက်ရှိ export သည် video/audio ကို ပြန် encode လုပ်ထားပြီး overlay ကို video ထဲ burn-in မလုပ်သေးပါ။");
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Unknown FFmpeg error";
+      setNotice(`MP4 export မအောင်မြင်ပါ။ Browser memory / FFmpeg loading ကို စစ်ပါ။ ${message.slice(0, 140)}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const exportSrt = () => {
     const safeText = project.subtitle.replace(/\r?\n/g, "\\N");
     const end = Math.max(1, Math.floor(duration || 60));
@@ -305,8 +348,8 @@ export default function EditorPage() {
             <div className="timeline-track"><span className="track-label">SUB</span><div className="track-clip">{project.subtitle || "Subtitle track"}</div></div>
             <div className="timeline-track"><span className="track-label">FX</span><div className="track-clip blur-clip">Blur overlay</div></div>
           </div>
-          <div className="editor-bottom-actions"><div className="save-status"><span className="status-dot" />{notice}</div><div className="action-buttons"><button className="editor-ghost" onClick={() => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...project, updatedAt: Date.now() })); setNotice("Project ကို local storage ထဲ သိမ်းပြီးပါပြီ။"); } catch { setNotice("Save မအောင်မြင်ပါ။"); } }}>{t.save}</button><button className="editor-primary" onClick={exportSrt}>{t.export} SRT</button></div></div>
-          <p className="editor-footnote">{t.exportNote} ယခုအဆင့်တွင် SRT export ကို ပံ့ပိုးထားပြီး MP4 render ကို FFmpeg.wasm integration ပြီးမှ ဖွင့်နိုင်ပါမည်။</p>
+          <div className="editor-bottom-actions"><div className="save-status"><span className="status-dot" />{notice}</div><div className="action-buttons"><button className="editor-ghost" onClick={() => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...project, updatedAt: Date.now() })); setNotice("Project ကို local storage ထဲ သိမ်းပြီးပါပြီ။"); } catch { setNotice("Save မအောင်မြင်ပါ။"); } }}>{t.save}</button><button className="editor-ghost" onClick={exportSrt}>Export SRT</button><button className="editor-primary" disabled={busy} onClick={() => void exportVideo()}>{busy ? `Rendering ${exportProgress}%` : "Export MP4"}</button></div></div>
+          <p className="editor-footnote">{t.exportNote} FFmpeg.wasm ဖြင့် MP4 encode လုပ်နိုင်ပါတယ်။ သို့သော် subtitle/blur ကို final video ထဲ burn-in လုပ်ခြင်းကို နောက်တစ်ဆင့်မှာ ချိတ်ဆက်ရပါမယ်။ ဖိုင်ကြီးများသည် browser memory ကြောင့် မအောင်မြင်နိုင်ပါ။</p>
         </section>
       </div>
     </main>
