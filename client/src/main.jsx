@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { Upload, Link as LinkIcon, Sparkles, Film, Subtitles, Download, LoaderCircle, FileVideo, Settings2, Eye, EyeOff, CheckCircle, KeyRound, Volume2, Mic2, Play, Trash2 } from 'lucide-react';
 import './style.css';
 
+const API_BASE = (import.meta.env.VITE_API_BASE || 'http://localhost:8787').replace(/\/$/, '');
+
 const seed = [{ id: 1, start: '00:00:00,000', end: '00:00:04,000', text: 'ConerZone မှ ကြိုဆိုပါတယ်။', x: 50, y: 68 }];
 const stamp = n => { const ms = Math.max(0, Math.round(n * 1000)); const h = Math.floor(ms / 3600000), m = Math.floor(ms % 3600000 / 60000), s = Math.floor(ms % 60000 / 1000), z = ms % 1000; return [h,m,s].map(v => String(v).padStart(2,'0')).join(':') + ',' + String(z).padStart(3,'0'); };
 const parseTime = t => { const p = String(t).replace(',', '.').split(':'); return (Number(p[0]||0)*3600 + Number(p[1]||0)*60 + Number(p[2]||0)); };
@@ -104,6 +106,33 @@ function App() {
     utterance.onstart = () => setStatus('Browser မှာ voice preview ဖွင့်နေပါတယ်။ Myanmar voice မရှိလျှင် အသံမမှန်နိုင်ပါ။');
     utterance.onerror = () => setStatus('ဒီဖုန်း/browser မှာ Burmese voice မရနိုင်ပါ။'); window.speechSynthesis.speak(utterance);
   }
+  async function renderFinalMp4() {
+    if (!video) return setStatus('MP4 ထုတ်ရန် video အရင်တင်ပါ။');
+    if (!subs.length) return setStatus('MP4 ထုတ်ရန် subtitle line မရှိပါ။');
+    const narration = (script || subs.map(s => s.text).join(' ')).trim();
+    if (!narration) return setStatus('အသံထုတ်ရန် Recap Script အရင်ဖန်တီးပါ။');
+    setBusy('render'); setStatus('Video ကို backend ဆီ upload လုပ်နေပါတယ်…');
+    try {
+      let uploaded;
+      if (video.file) {
+        const form = new FormData(); form.append('video', video.file);
+        const up = await fetch(API_BASE + '/api/upload', { method: 'POST', body: form });
+        const ud = await up.json(); if (!up.ok) throw new Error(ud.error || 'Video upload မအောင်မြင်ပါ။'); uploaded = ud;
+      } else {
+        const up = await fetch(API_BASE + '/api/import-url', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({url: video.src}) });
+        const ud = await up.json(); if (!up.ok) throw new Error(ud.error || 'URL မှ video import မအောင်မြင်ပါ။'); uploaded = ud;
+      }
+      setStatus('မြန်မာ AI voice ထုတ်နေပါတယ်…');
+      const tr = await fetch(API_BASE + '/api/tts', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({text:narration, gender:voiceGender}) });
+      const td = await tr.json(); if (!tr.ok) throw new Error(td.error || 'Burmese TTS မအောင်မြင်ပါ။');
+      setStatus('Video + voice + subtitle ကို MP4 အဖြစ် render လုပ်နေပါတယ်…');
+      const er = await fetch(API_BASE + '/api/export', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({filename:uploaded.filename, audioFilename:td.filename, srt:makeSrt(subs), fontSize, marginV:40}) });
+      const ed = await er.json(); if (!er.ok) throw new Error(ed.error || 'MP4 rendering မအောင်မြင်ပါ။');
+      const a=document.createElement('a'); a.href=API_BASE+ed.url; a.download=ed.filename || 'conerzone-recap.mp4'; a.target='_blank'; document.body.appendChild(a); a.click(); a.remove();
+      setStatus('MP4 အပြီးသတ်ပါပြီ။ Download စတင်ပါပြီ။');
+    } catch(e) { setStatus('MP4 export မအောင်မြင်ပါ: ' + e.message + ' — Backend URL, FFmpeg, Python edge-tts နဲ့ CORS settings ကို စစ်ပါ။'); }
+    finally { setBusy(''); }
+  }
   function addLine() {
     const id=Math.max(0,...subs.map(s=>s.id))+1, last=subs.length?parseTime(subs[subs.length-1].end):0;
     setSubs(old=>[...old,{id,start:stamp(last),end:stamp(last+4),text:'မြန်မာစာတန်းထိုးကို ဒီမှာရေးပါ…',x:50,y:82}]); setSelected(id);
@@ -165,7 +194,7 @@ function App() {
             </div>
             <div className="subtitle-tools"><button className="secondary-btn" disabled={working||!subs.length} onClick={improveSubs}>{busy==='subtitle'?<LoaderCircle className="spin" size={15}/>:<Sparkles size={15}/>} Gemini နဲ့ စာပြင်မယ်</button><button className="secondary-btn" disabled={!subs.length} onClick={downloadSrt}><Download size={15}/> SRT Download</button></div>
             {script&&<div className="script-wrap"><div className="panel-heading"><div className="section-title"><Sparkles size={17}/><h2>Generated Burmese Recap</h2></div><button className="text-btn" onClick={()=>{navigator.clipboard?.writeText(script);setStatus('Script copy လုပ်ပြီးပါပြီ။');}}>Copy Script</button></div><textarea className="script-output" value={script} onChange={e=>setScript(e.target.value)} rows={8}/></div>}
-            <div className="export-row"><button className="primary-btn" onClick={()=>setStatus('SRT ကို download လုပ်နိုင်ပါပြီ။ Burn-in subtitle နဲ့ Burmese dubbing ပါတဲ့ MP4 ထုတ်ရန် server-side video engine (FFmpeg + TTS) ကို ထပ်တည်ဆောက်ရပါမယ်။')}>Generate Recap Video (MP4)</button></div>
+            <div className="export-row"><button className="primary-btn" disabled={working} onClick={renderFinalMp4}>{busy==='render'?<LoaderCircle className="spin" size={15}/>:<Download size={15}/>} Generate Final MP4 (Burmese Voice)</button></div>
             <p className="tiny-note">အရေးကြီး — ဒီအဆင့်မှာ browser preview၊ recap script၊ subtitle editor နဲ့ SRT download အလုပ်လုပ်ပါတယ်။ အပြီးသတ် Burmese voice ပါတဲ့ MP4 ကို ထုတ်ဖို့ video rendering/TTS backend လိုအပ်နေသေးပါတယ်။</p>
           </div>
           <div className="status-line"><span className="status-dot"/><span>{working?'လုပ်ဆောင်နေပါတယ်… ':''}{status}</span></div>
