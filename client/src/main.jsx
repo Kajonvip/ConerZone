@@ -13,7 +13,7 @@ function App() {
   const [groqKey, setGroqKey] = useState(''), [geminiKey, setGeminiKey] = useState('');
   const [showGroq, setShowGroq] = useState(false), [showGemini, setShowGemini] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(true), [connection, setConnection] = useState('');
-  const [video, setVideo] = useState(null), [url, setUrl] = useState('');
+  const [video, setVideo] = useState(null), [url, setUrl] = useState(''), [previewEnabled, setPreviewEnabled] = useState(false);
   const [busy, setBusy] = useState(''), [status, setStatus] = useState('Video ဖိုင်ရွေးပါ။ ရွေးပြီးတာနဲ့ ဒီနေရာမှာပဲ preview ပေါ်လာပါမယ်။');
   const [subs, setSubs] = useState(seed), [selected, setSelected] = useState(1), [fontSize, setFontSize] = useState(25);
   const [blur, setBlur] = useState(8), [bgOpacity, setBgOpacity] = useState(68), [borderRadius, setBorderRadius] = useState(8);
@@ -33,14 +33,14 @@ function App() {
     if (file.size > 1024 * 1024 * 1024) { setStatus('ဒီဖိုင်က 1GB ထက်ကြီးပါတယ်။ ဖုန်း browser မလေးအောင် 1GB အောက် MP4 (H.264) ဖိုင်ကို အသုံးပြုပါ။'); return; }
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     const src = URL.createObjectURL(file); objectUrlRef.current = src;
-    setVideo({ name: file.name, src, file, duration: 0 }); setStatus(file.size > 500 * 1024 * 1024 ? 'Video တင်ပြီးပါပြီ။ ဖိုင်ကြီးလို့ စတင်ဖွင့်ရန် အချိန်ယူနိုင်ပါတယ်။ MP4 (H.264) သုံးပါက ပိုချောမွေ့ပါမယ်။' : 'Local video ကို preview မှာ တင်ပြီးပါပြီ။ Play ခလုတ်ကို နှိပ်ကြည့်နိုင်ပါတယ်။');
+    setVideo({ name: file.name, src, file, duration: 0 }); setPreviewEnabled(false); setStatus(file.size > 500 * 1024 * 1024 ? 'Video တင်ပြီးပါပြီ။ ဖိုင်ကြီးလို့ စတင်ဖွင့်ရန် အချိန်ယူနိုင်ပါတယ်။ MP4 (H.264) သုံးပါက ပိုချောမွေ့ပါမယ်။' : 'Local video ကို preview မှာ တင်ပြီးပါပြီ။ Play ခလုတ်ကို နှိပ်ကြည့်နိုင်ပါတယ်။');
     setScript(''); setSubs(seed); setSelected(1);
   }
   function importUrl() {
     if (!url.trim()) return;
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     objectUrlRef.current = '';
-    setVideo({ name: url.trim().split('/').pop().split('?')[0] || 'Remote video', src: url.trim(), duration: 0 });
+    setVideo({ name: url.trim().split('/').pop().split('?')[0] || 'Remote video', src: url.trim(), duration: 0 }); setPreviewEnabled(false);
     setStatus('URL preview ထည့်ထားပါပြီ။ Website အချို့က browser playback ကို ပိတ်ထားနိုင်ပါတယ်။');
   }
   async function groqChat(prompt) {
@@ -126,12 +126,12 @@ function App() {
         <aside className="panel sidebar">
           <div className="section-title"><Upload size={17}/><h2>၁။ Video တင်ရန်</h2></div>
           {!video && <button className="upload-zone" onClick={()=>fileRef.current?.click()}><FileVideo size={28}/><b>Video Upload</b><span>MP4 · MOV · WEBM · MKV</span><small>ဖိုင်ရွေးရန် နှိပ်ပါ</small></button>}
-          <input ref={fileRef} hidden type="file" accept="video/*,.mkv" onChange={e=>uploadFile(e.target.files?.[0])}/>
+          <input ref={fileRef} hidden type="file" accept="video/*,.mkv" onChange={e=>{uploadFile(e.target.files?.[0]);e.target.value="";}}/>
           {video && <div className="inline-preview">
             <div className="inline-preview-head"><b>Video Preview</b><button className="text-btn" onClick={()=>fileRef.current?.click()}>ပြောင်းရွေးရန်</button></div>
             <div ref={stageRef} className="video-stage" onPointerMove={moveSubtitle} onPointerUp={()=>{dragRef.current=false;}} onPointerCancel={()=>{dragRef.current=false;}}>
-              <video ref={videoRef} key={video.src} src={video.src} controls playsInline webkit-playsinline="true" preload="none" onLoadedMetadata={e=>setVideo(old=>old?{...old,duration:e.currentTarget.duration}:old)} onLoadedData={()=>setStatus('Video ဖွင့်ရန် အဆင်သင့်ပါပြီ။ Play ကိုနှိပ်ပါ။')} onError={()=>setStatus('Video ဖွင့်မရပါ။ ဒီဖိုင်ရဲ့ codec ကို browser မထောက်ပံ့နိုင်ပါ။ MP4 (H.264 + AAC) အဖြစ်ပြောင်းပြီး ပြန်တင်ပါ။')}/>
-              {active && <div className="subtitle-overlay" style={{left:active.x+'%',top:active.y+'%',fontSize:fontSize+'px',backdropFilter:'blur('+blur+'px)',WebkitBackdropFilter:'blur('+blur+'px)',background:'rgba(0,0,0,'+(bgOpacity/100)+')',borderRadius:borderRadius+'px'}} onPointerDown={e=>{e.preventDefault();dragRef.current=true;e.currentTarget.setPointerCapture(e.pointerId);}}>{active.text}</div>}
+              {!previewEnabled ? <button className="safe-preview-start" onClick={()=>setPreviewEnabled(true)}><Play size={24}/><b>Preview ဖွင့်ရန် နှိပ်ပါ</b><span>ဖိုင်တင်ပြီးပါပြီ။ ဖုန်း browser အဆင်ပြေစေရန် video ကို ဒီခလုတ်နှိပ်မှ ဖွင့်ပါမယ်။</span></button> : <video ref={videoRef} key={video.src} src={video.src} controls playsInline webkit-playsinline="true" preload="metadata" onLoadedMetadata={e=>setVideo(old=>old?{...old,duration:e.currentTarget.duration}:old)} onLoadedData={()=>setStatus('Video ဖွင့်ရန် အဆင်သင့်ပါပြီ။ Play ကိုနှိပ်ပါ။')} onError={()=>{setPreviewEnabled(false);setStatus('Video ကို browser က မဖွင့်နိုင်ပါ။ Preview ကို ပိတ်ထားပါတယ်။ MP4 (H.264 + AAC) ဖိုင်ဖြင့် ထပ်စမ်းပါ။');}}/>}
+              {previewEnabled && active && <div className="subtitle-overlay" style={{left:active.x+'%',top:active.y+'%',fontSize:fontSize+'px',backdropFilter:'blur('+blur+'px)',WebkitBackdropFilter:'blur('+blur+'px)',background:'rgba(0,0,0,'+(bgOpacity/100)+')',borderRadius:borderRadius+'px'}} onPointerDown={e=>{e.preventDefault();dragRef.current=true;e.currentTarget.setPointerCapture(e.pointerId);}}>{active.text}</div>}
             </div>
             <div className="preview-controls"><label><Volume2 size={16}/> အသံအတိုးအချဲ့ <input type="range" min="0" max="1" step="0.05" value={volume} onChange={e=>setVolume(Number(e.target.value))}/><b>{Math.round(volume*100)}%</b></label></div>
             <div className="preview-foot"><span>{video.name}</span><span>{video.duration?Math.round(video.duration)+' sec':''}</span></div>
