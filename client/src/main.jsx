@@ -23,7 +23,7 @@ function App() {
   const active = subs.find(s => s.id === selected) || subs[0];
   const working = Boolean(busy);
 
-  useEffect(() => () => { if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current); if (window.speechSynthesis) window.speechSynthesis.cancel(); }, []);
+  useEffect(() => { const boot = document.getElementById('boot-screen'); if (boot) boot.remove(); return () => { if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current); if (window.speechSynthesis) window.speechSynthesis.cancel(); }; }, []);
   useEffect(() => { if (videoRef.current) videoRef.current.volume = volume; }, [volume, video]);
   const update = (id, key, value) => setSubs(old => old.map(s => s.id === id ? { ...s, [key]: value } : s));
 
