@@ -79,15 +79,31 @@ app.post('/api/ai/subtitle', async (req, res) => {
   if (!parsed.success) return res.status(400).json({ error: 'Subtitle text ထည့်ပါ။' });
   try { res.json({ provider: 'Gemini', text: await cleanSubtitle(parsed.data, req.get('x-gemini-api-key')) }); } catch (e) { res.status(502).json({ error: e.message || 'Gemini API request မအောင်မြင်ပါ။' }); }
 });
+app.post('/api/tts', async (req, res) => {
+  const parsed = z.object({ text: z.string().min(1).max(20000), gender: z.enum(['male', 'female', 'auto']).default('female') }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'အသံထုတ်ရန် စာသားထည့်ပါ (အများဆုံး စာလုံး 20,000)။' });
+  const voice = parsed.data.gender === 'male' ? 'my-MM-ThihaNeural' : 'my-MM-NilarNeural';
+  const outName = randomUUID() + '.mp3';
+  const outPath = path.join(outputs, outName);
+  const child = spawn(process.env.PYTHON_BIN || 'python3', ['-m', 'edge_tts', '--voice', voice, '--text', parsed.data.text, '--write-media', outPath], { stdio: ['ignore', 'ignore', 'pipe'] });
+  let stderr = '';
+  child.stderr.on('data', d => { stderr = (stderr + d.toString()).slice(-4000); });
+  child.on('error', e => { fs.rmSync(outPath, { force: true }); if (!res.headersSent) res.status(500).json({ error: 'TTS runtime မရပါ။ Docker image ထဲမှာ Python နှင့် edge-tts install လုပ်ပါ။ ' + e.message }); });
+  child.on('close', code => {
+    if (res.headersSent) return;
+    if (code !== 0 || !fs.existsSync(outPath) || fs.statSync(outPath).size === 0) { fs.rmSync(outPath, { force: true }); return res.status(502).json({ error: 'မြန်မာအသံထုတ်မရပါ။ Internet/TTS service ကိုစစ်ပါ။ ' + stderr.slice(-1200) }); }
+    res.json({ ok: true, voice, filename: outName, url: '/exports/' + outName });
+  });
+});
 app.post('/api/export', async (req, res) => {
-  const parsed = z.object({ filename: z.string().regex(/^[a-f0-9-]+\.(mp4|mov|m4v|webm|mkv)$/i), srt: z.string().min(1).max(500000), fontSize: z.number().int().min(12).max(72).default(28), marginV: z.number().int().min(0).max(500).default(40) }).safeParse(req.body);
+  const parsed = z.object({ filename: z.string().regex(/^[a-f0-9-]+\.(mp4|mov|m4v|webm|mkv)$/i), srt: z.string().min(1).max(500000), audioFilename: z.string().regex(/^[a-f0-9-]+\.mp3$/i).optional(), fontSize: z.number().int().min(12).max(72).default(28), marginV: z.number().int().min(0).max(500).default(40) }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Export input မမှန်ပါ။' });
   const source = path.join(uploads, path.basename(parsed.data.filename));
   if (!fs.existsSync(source)) return res.status(404).json({ error: 'Video ဖိုင်မတွေ့ပါ။' });
   const outName = randomUUID() + '.mp4', outPath = path.join(outputs, outName), srtPath = path.join(os.tmpdir(), randomUUID() + '.srt');
   fs.writeFileSync(srtPath, parsed.data.srt, 'utf8');
   const safeSrt = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
-  const args = ['-y', '-i', source, '-vf', "subtitles='" + safeSrt + "':force_style='FontName=Noto Sans Myanmar,FontSize=" + parsed.data.fontSize + ',Outline=1,Shadow=0,MarginV=' + parsed.data.marginV + ",Alignment=2'", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outPath];
+  const audioPath = parsed.data.audioFilename ? path.join(outputs, path.basename(parsed.data.audioFilename)) : null;\n  if (parsed.data.audioFilename && !fs.existsSync(audioPath)) { fs.rmSync(srtPath, { force: true }); return res.status(404).json({ error: 'TTS audio file မတွေ့ပါ။' }); }\n  const args = ['-y', '-i', source, ...(audioPath ? ['-i', audioPath, '-map', '0:v:0', '-map', '1:a:0'] : []), '-vf', "subtitles='" + safeSrt + "':force_style='FontName=Noto Sans Myanmar,FontSize=" + parsed.data.fontSize + ',Outline=1,Shadow=0,MarginV=' + parsed.data.marginV + ",Alignment=2'", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', ...(audioPath ? ['-shortest'] : []), '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outPath];
   const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] }); let stderr = '';
   child.stderr.on('data', d => { stderr = (stderr + d.toString()).slice(-5000); });
   child.on('error', e => { fs.rmSync(srtPath, { force: true }); if (!res.headersSent) res.status(500).json({ error: 'Backend တွင် FFmpeg install လုပ်ထားရန်လိုသည်။ ' + e.message }); });
