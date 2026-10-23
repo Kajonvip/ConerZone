@@ -29,7 +29,7 @@ function App() {
 
   function uploadFile(file) {
     if (!file) return;
-    if (!file.type.startsWith('video/') && !/\\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(file.name)) { setStatus('Video ဖိုင်မဟုတ်ပါ။ MP4 (H.264) ဖိုင်ကို ရွေးပါ။'); return; }
+    if (!file.type.startsWith('video/') && !/\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(file.name)) { setStatus('Video ဖိုင်မဟုတ်ပါ။ MP4 (H.264) ဖိုင်ကို ရွေးပါ။'); return; }
     if (file.size > 1024 * 1024 * 1024) { setStatus('ဒီဖိုင်က 1GB ထက်ကြီးပါတယ်။ ဖုန်း browser မလေးအောင် 1GB အောက် MP4 (H.264) ဖိုင်ကို အသုံးပြုပါ။'); return; }
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     const src = URL.createObjectURL(file); objectUrlRef.current = src;
