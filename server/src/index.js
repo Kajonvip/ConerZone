@@ -10,14 +10,15 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { generateRecap, cleanSubtitle } from './ai.js';
+import { generateRecap, cleanSubtitle, testGroq, testGemini } from './ai.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const uploads = path.join(root, 'uploads'), outputs = path.join(root, 'outputs');
 fs.mkdirSync(uploads, { recursive: true }); fs.mkdirSync(outputs, { recursive: true });
 const app = express();
 app.use(helmet({ crossOriginResourcePolicy: { policy: 'cross-origin' } }));
-app.use(cors({ origin: (process.env.CLIENT_ORIGIN || 'http://localhost:5173').split(',').map(x => x.trim()) }));
+const allowedOrigins = (process.env.CLIENT_ORIGIN || 'http://localhost:5173').split(',').map(x => x.trim());
+app.use(cors({ origin: (origin, cb) => cb(null, !origin || allowedOrigins.includes('*') || allowedOrigins.includes(origin)), allowedHeaders: ['Content-Type', 'x-groq-api-key', 'x-gemini-api-key'], methods: ['GET', 'POST', 'OPTIONS'] }));
 app.use(express.json({ limit: '2mb' }));
 app.use('/media', express.static(uploads, { fallthrough: false, setHeaders: res => res.setHeader('Cache-Control', 'no-store') }));
 app.use('/exports', express.static(outputs, { fallthrough: false }));
@@ -27,6 +28,16 @@ const storage = multer.diskStorage({ destination: uploads, filename: (_req, file
 const upload = multer({ storage, limits: { fileSize: maxMb * 1024 * 1024 }, fileFilter: (_req, file, cb) => allowed.has(path.extname(file.originalname).toLowerCase()) ? cb(null, true) : cb(new Error('MP4, MOV, M4V, WEBM သို့မဟုတ် MKV ဖိုင်သာ တင်ပါ။')) });
 
 app.get('/api/health', (_req, res) => res.json({ ok: true, app: 'ConerZone AI Movie Recap Studio', ai: ['Groq', 'Gemini'], ffmpeg: 'server-installed-required' }));
+app.post('/api/ai/test', async (req, res) => {
+  const wants = z.object({ groq: z.boolean().optional(), gemini: z.boolean().optional() }).safeParse(req.body || {});
+  if (!wants.success || (!wants.data.groq && !wants.data.gemini)) return res.status(400).json({ error: 'Groq သို့မဟုတ် Gemini API Key အနည်းဆုံးတစ်ခု ထည့်ပါ။' });
+  const results = [];
+  try {
+    if (wants.data.groq) { await testGroq(req.get('x-groq-api-key')); results.push('Groq OK'); }
+    if (wants.data.gemini) { await testGemini(req.get('x-gemini-api-key')); results.push('Gemini OK'); }
+    res.json({ ok: true, message: results.join(' · ') });
+  } catch (e) { res.status(502).json({ error: 'API connection မအောင်မြင်ပါ: ' + (e.message || 'Provider error') }); }
+});
 app.post('/api/upload', upload.single('video'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Video file မတွေ့ပါ။' });
   res.json({ filename: req.file.filename, name: req.file.originalname, url: '/media/' + encodeURIComponent(req.file.filename), size: req.file.size });
@@ -61,12 +72,12 @@ app.post('/api/import-url', async (req, res) => {
 app.post('/api/ai/recap', async (req, res) => {
   const parsed = z.object({ title: z.string().max(200).optional(), language: z.string().max(40).optional(), duration: z.string().max(40).optional(), notes: z.string().max(12000).optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Input မမှန်ပါ။' });
-  try { res.json({ provider: 'Groq', text: await generateRecap(parsed.data) }); } catch (e) { res.status(502).json({ error: e.message || 'Groq API request မအောင်မြင်ပါ။' }); }
+  try { res.json({ provider: 'Groq', text: await generateRecap(parsed.data, req.get('x-groq-api-key')) }); } catch (e) { res.status(502).json({ error: e.message || 'Groq API request မအောင်မြင်ပါ။' }); }
 });
 app.post('/api/ai/subtitle', async (req, res) => {
   const parsed = z.object({ text: z.string().min(1).max(12000), targetLanguage: z.string().max(40).optional(), task: z.enum(['proofread', 'translate', 'simplify']).optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Subtitle text ထည့်ပါ။' });
-  try { res.json({ provider: 'Gemini', text: await cleanSubtitle(parsed.data) }); } catch (e) { res.status(502).json({ error: e.message || 'Gemini API request မအောင်မြင်ပါ။' }); }
+  try { res.json({ provider: 'Gemini', text: await cleanSubtitle(parsed.data, req.get('x-gemini-api-key')) }); } catch (e) { res.status(502).json({ error: e.message || 'Gemini API request မအောင်မြင်ပါ။' }); }
 });
 app.post('/api/export', async (req, res) => {
   const parsed = z.object({ filename: z.string().regex(/^[a-f0-9-]+\.(mp4|mov|m4v|webm|mkv)$/i), srt: z.string().min(1).max(500000), fontSize: z.number().int().min(12).max(72).default(28), marginV: z.number().int().min(0).max(500).default(40) }).safeParse(req.body);
