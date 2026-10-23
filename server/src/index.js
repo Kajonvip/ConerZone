@@ -10,7 +10,7 @@ import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { z } from 'zod';
-import { generateRecap, cleanSubtitle, testGroq, testGemini } from './ai.js';
+import { generateRecap, cleanSubtitle, testGroq, testGemini, describeMovieFrames, matchScenesToNarration } from './ai.js';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const uploads = path.join(root, 'uploads'), outputs = path.join(root, 'outputs');
@@ -69,6 +69,62 @@ app.post('/api/import-url', async (req, res) => {
     res.json({ filename: name, name: path.basename(u.pathname), url: '/media/' + encodeURIComponent(name), size: total });
   } catch (e) { fs.rmSync(dest, { force: true }); res.status(400).json({ error: 'Video URL မှ download မအောင်မြင်ပါ။ Direct downloadable URL ကို စစ်ပါ။ ' + e.message }); }
 });
+
+function runProcess(command, args, opts = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'], ...opts });
+    const stdout = [], stderr = [];
+    child.stdout.on('data', d => stdout.push(d));
+    child.stderr.on('data', d => stderr.push(d));
+    child.on('error', reject);
+    child.on('close', code => code === 0 ? resolve({ stdout: Buffer.concat(stdout), stderr: Buffer.concat(stderr).toString('utf8') }) : reject(new Error(Buffer.concat(stderr).toString('utf8').slice(-1200) || command + ' failed (' + code + ')')));
+  });
+}
+app.post('/api/analyze-movie', async (req, res) => {
+  const parsed = z.object({ filename: z.string().regex(/^[a-f0-9-]+\.(mp4|mov|m4v|webm|mkv)$/i), sampleLimit: z.number().int().min(4).max(24).default(12) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error: 'Video filename မမှန်ပါ။' });
+  const source = path.join(uploads, path.basename(parsed.data.filename));
+  if (!fs.existsSync(source)) return res.status(404).json({ error: 'Video ဖိုင်မတွေ့ပါ။ Backend ဆီ upload အရင်လုပ်ပါ။' });
+  try {
+    const probe = await runProcess('ffprobe', ['-v','error','-show_entries','format=duration:stream=codec_type,width,height','-of','json',source]);
+    const meta = JSON.parse(probe.stdout.toString('utf8') || '{}');
+    const duration = Number(meta.format?.duration || 0);
+    if (!Number.isFinite(duration) || duration <= 0) throw new Error('Video duration မဖတ်နိုင်ပါ။');
+    // Scene detection returns timestamp candidates. Cap samples so long films remain manageable.
+    const detect = await runProcess('ffmpeg', ['-hide_banner','-i',source,'-vf','scdet=t=12','-an','-f','null','-']);
+    const cutTimes = [...detect.stderr.matchAll(/lavfi\.scd\.time:\s*([0-9.]+)/g)].map(m=>Number(m[1])).filter(n=>n>0 && n<duration);
+    const interval = duration / Math.max(3, parsed.data.sampleLimit - 1);
+    const candidates = [0, ...cutTimes, ...Array.from({length: parsed.data.sampleLimit - 1},(_,i)=>(i+1)*interval)]
+      .filter(n=>Number.isFinite(n) && n>=0 && n<duration).sort((a,b)=>a-b);
+    const times = [];
+    for (const t of candidates) if (!times.some(x=>Math.abs(x-t)<Math.max(3, duration/parsed.data.sampleLimit/2))) times.push(t);
+    const chosen = times.slice(0, parsed.data.sampleLimit);
+    const frames = [];
+    for (let i=0;i<chosen.length;i++) {
+      const t=chosen[i];
+      const shot=await runProcess('ffmpeg',['-hide_banner','-loglevel','error','-ss',String(t),'-i',source,'-frames:v','1','-vf','scale=512:-1','-q:v','5','-f','image2pipe','-vcodec','mjpeg','pipe:1']);
+      if (shot.stdout.length) frames.push({index:i,time:Number(t.toFixed(2)),base64:shot.stdout.toString('base64')});
+    }
+    if (!frames.length) throw new Error('Keyframe မထုတ်နိုင်ပါ။ Video codec ကို စစ်ပါ။');
+    const descriptions = await describeMovieFrames(frames, req.get('x-gemini-api-key'));
+    const scenes = frames.map(f => {
+      const d=Array.isArray(descriptions)?descriptions.find(x=>Number(x.index)===f.index):null;
+      return { index:f.index, start:f.time, end:Number(Math.min(duration, f.time + Math.max(3, interval)).toFixed(2)), description:d?.description || 'Gemini မှ ဖော်ပြချက်မရပါ', mood:d?.mood || '', visible_action:d?.visible_action || '' };
+    });
+    res.json({ ok:true, filename:parsed.data.filename, duration:Number(duration.toFixed(2)), width:meta.streams?.find(s=>s.codec_type==='video')?.width || null, height:meta.streams?.find(s=>s.codec_type==='video')?.height || null, sceneCount:cutTimes.length, sampled:scenes.length, scenes });
+  } catch(e) { res.status(502).json({ error:'Movie analysis မအောင်မြင်ပါ: '+(e.message||'FFmpeg/Gemini error') }); }
+});
+app.post('/api/ai/scene-plan', async (req, res) => {
+  const parsed = z.object({ script:z.string().min(1).max(18000), scenes:z.array(z.object({index:z.number().int(),start:z.number(),end:z.number(),description:z.string().max(1000),mood:z.string().optional(),visible_action:z.string().optional()})).min(1).max(24), targetDuration:z.number().int().min(30).max(7200) }).safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ error:'Narration နဲ့ Scene အချက်အလက် မပြည့်စုံပါ။' });
+  try {
+    const plan=await matchScenesToNarration(parsed.data.script,parsed.data.scenes,parsed.data.targetDuration,req.get('x-gemini-api-key'));
+    const selections=Array.isArray(plan.selections)?plan.selections:[];
+    const valid=selections.filter(s=>Number.isInteger(s.sceneIndex)&&parsed.data.scenes.some(x=>x.index===s.sceneIndex));
+    res.json({ok:true,selections:valid});
+  } catch(e) { res.status(502).json({error:'Scene plan မဖန်တီးနိုင်ပါ: '+(e.message||'Gemini error')}); }
+});
+
 app.post('/api/ai/recap', async (req, res) => {
   const parsed = z.object({ title: z.string().max(200).optional(), language: z.string().max(40).optional(), duration: z.string().max(40).optional(), notes: z.string().max(12000).optional() }).safeParse(req.body);
   if (!parsed.success) return res.status(400).json({ error: 'Input မမှန်ပါ။' });
