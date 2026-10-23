@@ -3,7 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { Upload, Link as LinkIcon, Sparkles, Film, Subtitles, Download, LoaderCircle, FileVideo, Settings2, Eye, EyeOff, CheckCircle, KeyRound, Volume2, Mic2, Play, Trash2 } from 'lucide-react';
 import './style.css';
 
-const seed = [{ id: 1, start: '00:00:00,000', end: '00:00:04,000', text: 'ConerZone မှ ကြိုဆိုပါတယ်။', x: 50, y: 82 }];
+const seed = [{ id: 1, start: '00:00:00,000', end: '00:00:04,000', text: 'ConerZone မှ ကြိုဆိုပါတယ်။', x: 50, y: 68 }];
 const stamp = n => { const ms = Math.max(0, Math.round(n * 1000)); const h = Math.floor(ms / 3600000), m = Math.floor(ms % 3600000 / 60000), s = Math.floor(ms % 60000 / 1000), z = ms % 1000; return [h,m,s].map(v => String(v).padStart(2,'0')).join(':') + ',' + String(z).padStart(3,'0'); };
 const parseTime = t => { const p = String(t).replace(',', '.').split(':'); return (Number(p[0]||0)*3600 + Number(p[1]||0)*60 + Number(p[2]||0)); };
 const makeSrt = rows => rows.map((s,i) => (i+1) + '\n' + s.start.replace('.', ',') + ' --> ' + s.end.replace('.', ',') + '\n' + s.text + '\n').join('\n');
@@ -29,9 +29,11 @@ function App() {
 
   function uploadFile(file) {
     if (!file) return;
+    if (!file.type.startsWith('video/') && !/\\.(mp4|mov|webm|m4v|mkv|avi)$/i.test(file.name)) { setStatus('Video ဖိုင်မဟုတ်ပါ။ MP4 (H.264) ဖိုင်ကို ရွေးပါ။'); return; }
+    if (file.size > 1024 * 1024 * 1024) { setStatus('ဒီဖိုင်က 1GB ထက်ကြီးပါတယ်။ ဖုန်း browser မလေးအောင် 1GB အောက် MP4 (H.264) ဖိုင်ကို အသုံးပြုပါ။'); return; }
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     const src = URL.createObjectURL(file); objectUrlRef.current = src;
-    setVideo({ name: file.name, src, file, duration: 0 }); setStatus('Local video ကို preview မှာ တင်ပြီးပါပြီ။ Play ခလုတ်ကို နှိပ်ကြည့်နိုင်ပါတယ်။');
+    setVideo({ name: file.name, src, file, duration: 0 }); setStatus(file.size > 500 * 1024 * 1024 ? 'Video တင်ပြီးပါပြီ။ ဖိုင်ကြီးလို့ စတင်ဖွင့်ရန် အချိန်ယူနိုင်ပါတယ်။ MP4 (H.264) သုံးပါက ပိုချောမွေ့ပါမယ်။' : 'Local video ကို preview မှာ တင်ပြီးပါပြီ။ Play ခလုတ်ကို နှိပ်ကြည့်နိုင်ပါတယ်။');
     setScript(''); setSubs(seed); setSelected(1);
   }
   function importUrl() {
@@ -110,7 +112,7 @@ function App() {
     <header className="topbar"><div className="brand-mark">CZ</div><div className="brand"><strong>ConerZone</strong><span>AI MOVIE RECAP STUDIO</span></div><div className="spacer"/><button className="settings-toggle" onClick={()=>setSettingsOpen(v=>!v)}><Settings2 size={16}/> API Settings</button><span className="api-pill">GROQ + GEMINI</span></header>
     <main>
       {settingsOpen && <section className="panel settings-panel">
-        <div className="panel-heading"><div className="section-title"><KeyRound size={18}/><h2>AI API Settings</h2></div><span className="tiny-note">Backend URL မလိုပါ</span></div>
+        <div className="panel-heading"><div className="section-title"><KeyRound size={18}/><h2>AI API Settings</h2></div><span className="tiny-note">API Key သာလိုအပ်သည်</span></div>
         <div className="settings-grid">
           <div><label>Groq API Key</label><div className="secret-input"><input className="text-input" type={showGroq?'text':'password'} autoComplete="off" value={groqKey} onChange={e=>setGroqKey(e.target.value)} placeholder="gsk_…"/><button onClick={()=>setShowGroq(v=>!v)} aria-label="Groq key ပြ/ဖျောက်">{showGroq?<EyeOff size={16}/>:<Eye size={16}/>}</button></div><small>မြန်မာ Movie Recap Script ဖန်တီးရန်။</small></div>
           <div><label>Gemini API Key</label><div className="secret-input"><input className="text-input" type={showGemini?'text':'password'} autoComplete="off" value={geminiKey} onChange={e=>setGeminiKey(e.target.value)} placeholder="AIza…"/><button onClick={()=>setShowGemini(v=>!v)} aria-label="Gemini key ပြ/ဖျောက်">{showGemini?<EyeOff size={16}/>:<Eye size={16}/>}</button></div><small>မြန်မာစာတန်းထိုး စစ်ဆေးပြင်ဆင်ရန်။</small></div>
@@ -128,7 +130,7 @@ function App() {
           {video && <div className="inline-preview">
             <div className="inline-preview-head"><b>Video Preview</b><button className="text-btn" onClick={()=>fileRef.current?.click()}>ပြောင်းရွေးရန်</button></div>
             <div ref={stageRef} className="video-stage" onPointerMove={moveSubtitle} onPointerUp={()=>{dragRef.current=false;}} onPointerCancel={()=>{dragRef.current=false;}}>
-              <video ref={videoRef} key={video.src} src={video.src} controls playsInline preload="metadata" onLoadedMetadata={e=>setVideo(old=>old?{...old,duration:e.currentTarget.duration}:old)} onError={()=>setStatus('Preview မဖွင့်နိုင်ပါ။ File format သို့မဟုတ် URL ကို စစ်ပါ။')}/>
+              <video ref={videoRef} key={video.src} src={video.src} controls playsInline webkit-playsinline="true" preload="none" onLoadedMetadata={e=>setVideo(old=>old?{...old,duration:e.currentTarget.duration}:old)} onLoadedData={()=>setStatus('Video ဖွင့်ရန် အဆင်သင့်ပါပြီ။ Play ကိုနှိပ်ပါ။')} onError={()=>setStatus('Video ဖွင့်မရပါ။ ဒီဖိုင်ရဲ့ codec ကို browser မထောက်ပံ့နိုင်ပါ။ MP4 (H.264 + AAC) အဖြစ်ပြောင်းပြီး ပြန်တင်ပါ။')}/>
               {active && <div className="subtitle-overlay" style={{left:active.x+'%',top:active.y+'%',fontSize:fontSize+'px',backdropFilter:'blur('+blur+'px)',WebkitBackdropFilter:'blur('+blur+'px)',background:'rgba(0,0,0,'+(bgOpacity/100)+')',borderRadius:borderRadius+'px'}} onPointerDown={e=>{e.preventDefault();dragRef.current=true;e.currentTarget.setPointerCapture(e.pointerId);}}>{active.text}</div>}
             </div>
             <div className="preview-controls"><label><Volume2 size={16}/> အသံအတိုးအချဲ့ <input type="range" min="0" max="1" step="0.05" value={volume} onChange={e=>setVolume(Number(e.target.value))}/><b>{Math.round(volume*100)}%</b></label></div>
