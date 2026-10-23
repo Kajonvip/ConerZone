@@ -32,7 +32,7 @@ function App() {
     if (objectUrlRef.current) URL.revokeObjectURL(objectUrlRef.current);
     const src = URL.createObjectURL(file); objectUrlRef.current = src;
     setVideo({ name: file.name, src, file, duration: 0 }); setStatus('Local video ကို preview မှာ တင်ပြီးပါပြီ။ Play ခလုတ်ကို နှိပ်ကြည့်နိုင်ပါတယ်။');
-    setScript(''); setSubs([]);
+    setScript(''); setSubs(seed); setSelected(1);
   }
   function importUrl() {
     if (!url.trim()) return;
