@@ -39,3 +39,9 @@
 .safe-preview-start{position:absolute;inset:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:22px;border:0;background:#101018;color:#c4b7ff;text-align:center;z-index:2}
 .safe-preview-start b{font-size:13px;color:#f0ecfa}
 .safe-preview-start span{max-width:280px;font-size:10px;line-height:1.7;color:#918aa5}
+
+/* Match the uploaded video's native orientation, like the reference preview */
+.inline-preview .video-stage{margin:0 auto;max-height:70vh;min-height:160px}
+.inline-preview .video-stage.portrait-stage{max-width:250px}
+.inline-preview .video-stage.landscape-stage{max-width:100%}
+.inline-preview .video-stage video{object-fit:contain}
