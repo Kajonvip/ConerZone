@@ -16,6 +16,7 @@ function App() {
   const [showGroq, setShowGroq] = useState(false), [showGemini, setShowGemini] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(true), [connection, setConnection] = useState('');
   const [video, setVideo] = useState(null), [url, setUrl] = useState(''), [previewEnabled, setPreviewEnabled] = useState(false);
+  const [analysis, setAnalysis] = useState(null), [scenePlan, setScenePlan] = useState([]), [backendFilename, setBackendFilename] = useState('');
   const [busy, setBusy] = useState(''), [status, setStatus] = useState('Video ဖိုင်ရွေးပါ။ ရွေးပြီးတာနဲ့ ဒီနေရာမှာပဲ preview ပေါ်လာပါမယ်။');
   const [subs, setSubs] = useState(seed), [selected, setSelected] = useState(1), [fontSize, setFontSize] = useState(25);
   const [blur, setBlur] = useState(8), [bgOpacity, setBgOpacity] = useState(68), [borderRadius, setBorderRadius] = useState(8);
@@ -106,6 +107,43 @@ function App() {
     utterance.onstart = () => setStatus('Browser မှာ voice preview ဖွင့်နေပါတယ်။ Myanmar voice မရှိလျှင် အသံမမှန်နိုင်ပါ။');
     utterance.onerror = () => setStatus('ဒီဖုန်း/browser မှာ Burmese voice မရနိုင်ပါ။'); window.speechSynthesis.speak(utterance);
   }
+
+  async function analyzeMovie() {
+    if (!video) return setStatus('Analyze လုပ်ရန် ရုပ်ရှင်ဖိုင်အရင်ရွေးပါ။');
+    if (!geminiKey.trim()) return setStatus('Movie Analysis အတွက် Gemini API Key ထည့်ပါ။');
+    setBusy('analyze'); setStatus('Video ကို backend ဆီတင်ပြီး scene များ ခွဲခြမ်းစိတ်ဖြာနေပါတယ်…');
+    try {
+      let uploaded;
+      if (video.file) {
+        const form = new FormData(); form.append('video', video.file);
+        const up = await fetch(API_BASE + '/api/upload', {method:'POST',body:form});
+        const d = await up.json(); if (!up.ok) throw new Error(d.error || 'Video upload မအောင်မြင်ပါ။'); uploaded=d;
+      } else {
+        const up = await fetch(API_BASE + '/api/import-url', {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:video.src})});
+        const d = await up.json(); if (!up.ok) throw new Error(d.error || 'Video URL import မအောင်မြင်ပါ။'); uploaded=d;
+      }
+      setBackendFilename(uploaded.filename);
+      setStatus('FFmpeg က scene cut နဲ့ keyframe တွေရှာပြီး Gemini Vision က frame များကို ဖော်ပြနေပါတယ်…');
+      const r = await fetch(API_BASE + '/api/analyze-movie',{method:'POST',headers:{'Content-Type':'application/json','x-gemini-api-key':geminiKey.trim()},body:JSON.stringify({filename:uploaded.filename,sampleLimit:12})});
+      const d=await r.json(); if(!r.ok) throw new Error(d.error || 'Movie analysis မအောင်မြင်ပါ။');
+      setAnalysis(d); setScenePlan([]); setStatus('Movie analysis ပြီးပါပြီ။ Scene Timeline ကို စစ်ပြီး Auto Select Scenes ကိုနှိပ်ပါ။');
+    } catch(e) { setStatus('Analyze Movie မအောင်မြင်ပါ: '+e.message+' — Backend deploy နဲ့ Gemini key ကို စစ်ပါ။'); }
+    finally { setBusy(''); }
+  }
+  async function autoSelectScenes() {
+    if (!analysis?.scenes?.length) return setStatus('Scene analysis အရင်လုပ်ပါ။');
+    if (!script.trim()) return setStatus('Scene ရွေးရန် မြန်မာ Recap Script အရင်ဖန်တီးပါ။');
+    if (!geminiKey.trim()) return setStatus('Auto Select Scenes အတွက် Gemini API Key ထည့်ပါ။');
+    setBusy('select-scenes'); setStatus('Gemini က narration နဲ့ scene များကို ကိုက်ညီအောင် timeline စီစဉ်နေပါတယ်…');
+    try {
+      const targetDuration=Math.min(7200,Math.max(180,Math.round((video?.duration || analysis.duration)*0.1)));
+      const r=await fetch(API_BASE+'/api/ai/scene-plan',{method:'POST',headers:{'Content-Type':'application/json','x-gemini-api-key':geminiKey.trim()},body:JSON.stringify({script,scenes:analysis.scenes,targetDuration})});
+      const d=await r.json(); if(!r.ok) throw new Error(d.error||'Scene plan မအောင်မြင်ပါ။');
+      setScenePlan(d.selections||[]); setStatus('AI Scene Timeline ဖန်တီးပြီးပါပြီ။ လက်ရှိအဆင့်မှာ render က မူရင်း video ကိုသုံးနေသေးပြီး scene-cut rendering ကို ဆက်ချိတ်ရပါမယ်။');
+    } catch(e) { setStatus('Auto Select Scenes မအောင်မြင်ပါ: '+e.message); }
+    finally { setBusy(''); }
+  }
+
   async function renderFinalMp4() {
     if (!video) return setStatus('MP4 ထုတ်ရန် video အရင်တင်ပါ။');
     if (!subs.length) return setStatus('MP4 ထုတ်ရန် subtitle line မရှိပါ။');
@@ -165,6 +203,8 @@ function App() {
             <div className="preview-controls"><label><Volume2 size={16}/> အသံအတိုးအချဲ့ <input type="range" min="0" max="1" step="0.05" value={volume} onChange={e=>setVolume(Number(e.target.value))}/><b>{Math.round(volume*100)}%</b></label></div>
             <div className="preview-foot"><span>{video.name}</span><span>{video.duration?Math.round(video.duration)+' sec':''}</span></div>
           </div>}
+          <button className="secondary-btn full" disabled={working||!video} onClick={analyzeMovie}>{busy==='analyze'?<LoaderCircle className="spin" size={15}/>:<Film size={15}/>} Analyze Movie — AI နဲ့ ခွဲခြမ်းစိတ်ဖြာမယ်</button>
+          <p className="tiny-note">FFmpeg scene detection + Gemini Vision keyframe analysis (server backend လိုအပ်သည်)။</p>
           <div className="or">OR VIDEO URL</div><div className="url-field"><LinkIcon size={16}/><input value={url} onChange={e=>setUrl(e.target.value)} placeholder="Direct .mp4 URL"/></div>
           <button className="secondary-btn full" disabled={!url.trim()} onClick={importUrl}>URL Preview ပြမယ်</button>
           <div className="divider"/>
@@ -175,6 +215,14 @@ function App() {
           <div className="tiny-note">လက်ရှိ Groq က ပေးထားသော plot notes ကို အခြေခံပြီး script ရေးပေးပါတယ်။</div>
         </aside>
         <section className="editor-column">
+          {analysis && <div className="panel">
+            <div className="panel-heading"><div className="section-title"><Film size={17}/><h2>AI Scene Timeline</h2></div><span className="tiny-note">{analysis.sampled} frames</span></div>
+            <p className="tiny-note">Movie duration: {Math.round(analysis.duration)} sec · Detected cuts: {analysis.sceneCount}. နမူနာ frame များအပေါ်အခြေခံထားသော analysis ဖြစ်သည်။</p>
+            <div className="scene-timeline">{analysis.scenes.map(s=><div className="subtitle-row" key={s.index}><div className="sub-index">{String(s.index+1).padStart(2,'0')}</div><div className="sub-fields"><b>{s.start}s – {s.end}s</b><div>{s.description}</div>{s.mood&&<small>{s.mood}</small>}</div></div>)}</div>
+            <button className="primary-btn full" disabled={working||!script} onClick={autoSelectScenes}>{busy==='select-scenes'?<LoaderCircle className="spin" size={15}/>:<Sparkles size={15}/>} Auto Select Scenes</button>
+            {scenePlan.length>0 && <div className="scene-timeline"><h3>AI ရွေးချယ်ထားသော Timeline</h3>{scenePlan.map((s,i)=><div className="subtitle-row" key={i}><div className="sub-index">{i+1}</div><div className="sub-fields"><b>Scene #{s.sceneIndex+1} · {s.start}s–{s.end}s</b><div>{s.narration}</div><small>{s.reason}</small></div></div>)}</div>}
+          </div>}
+
           <div className="panel">
             <div className="panel-heading"><div className="section-title"><Mic2 size={17}/><h2>၃။ Recap အသံရွေးချယ်ရန်</h2></div></div>
             <label>အသံအမျိုးအစား</label><div className="option-row"><button className={voiceGender==='male'?'choice active':'choice'} onClick={()=>setVoiceGender('male')}>ယောက်ျားအသံ</button><button className={voiceGender==='female'?'choice active':'choice'} onClick={()=>setVoiceGender('female')}>မိန်းမအသံ</button><button className={voiceGender==='auto'?'choice active':'choice'} onClick={()=>setVoiceGender('auto')}>Auto</button></div>
