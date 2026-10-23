@@ -105,7 +105,7 @@ app.post('/api/export', async (req, res) => {
   const safeSrt = srtPath.replace(/\\/g, '/').replace(/:/g, '\\:').replace(/'/g, "\\'");
   const audioPath = parsed.data.audioFilename ? path.join(outputs, path.basename(parsed.data.audioFilename)) : null;
   if (parsed.data.audioFilename && !fs.existsSync(audioPath)) { fs.rmSync(srtPath, { force: true }); return res.status(404).json({ error: 'TTS audio file မတွေ့ပါ။' }); }
-  const args = ['-y', '-i', source, ...(audioPath ? ['-i', audioPath, '-map', '0:v:0', '-map', '1:a:0'] : []), '-vf', "subtitles='" + safeSrt + "':force_style='FontName=Noto Sans Myanmar,FontSize=" + parsed.data.fontSize + ',Outline=1,Shadow=0,MarginV=' + parsed.data.marginV + ",Alignment=2'", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', ...(audioPath ? ['-shortest'] : []), '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outPath];
+  const args = ['-y', ...(audioPath ? ['-stream_loop', '-1'] : []), '-i', source, ...(audioPath ? ['-i', audioPath, '-map', '0:v:0', '-map', '1:a:0'] : []), '-vf', "subtitles='" + safeSrt + "':force_style='FontName=Noto Sans Myanmar,FontSize=" + parsed.data.fontSize + ',Outline=1,Shadow=0,MarginV=' + parsed.data.marginV + ",Alignment=2'", '-c:v', 'libx264', '-preset', 'veryfast', '-crf', '23', ...(audioPath ? ['-shortest'] : []), '-c:a', 'aac', '-b:a', '128k', '-movflags', '+faststart', outPath];
   const child = spawn('ffmpeg', args, { stdio: ['ignore', 'ignore', 'pipe'] }); let stderr = '';
   child.stderr.on('data', d => { stderr = (stderr + d.toString()).slice(-5000); });
   child.on('error', e => { fs.rmSync(srtPath, { force: true }); if (!res.headersSent) res.status(500).json({ error: 'Backend တွင် FFmpeg install လုပ်ထားရန်လိုသည်။ ' + e.message }); });
