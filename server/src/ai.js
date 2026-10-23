@@ -36,3 +36,39 @@ export async function testGemini(apiKey) {
   const response = await gemini(apiKey).models.generateContent({ model: process.env.GEMINI_MODEL || 'gemini-2.5-flash', contents: 'Reply with exactly: Gemini connection OK' });
   return Boolean(response.text);
 }
+
+
+export async function describeMovieFrames(frames, apiKey) {
+  const prompt = 'You are analyzing selected keyframes from a movie in chronological order. For each image, describe only visible content in one concise sentence. Do not infer unseen plot details. Return JSON array with objects {index, description, mood, visible_action}. Keep index matching the provided frame number.';
+  const parts = [{ text: prompt }];
+  for (const frame of frames) {
+    parts.push({ text: 'Frame index: ' + frame.index + ', approximate timestamp: ' + frame.time + ' seconds.' });
+    parts.push({ inlineData: { mimeType: 'image/jpeg', data: frame.base64 } });
+  }
+  const response = await gemini(apiKey).models.generateContent({
+    model: process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    contents: [{ role: 'user', parts }],
+    config: { responseMimeType: 'application/json', temperature: 0.2 }
+  });
+  const raw = response.text || '[]';
+  try { return JSON.parse(raw); } catch {
+    const match = raw.match(/\[[\s\S]*\]/);
+    if (match) return JSON.parse(match[0]);
+    throw new Error('Gemini Vision က JSON အဖြေမပြန်ပါ။');
+  }
+}
+
+export async function matchScenesToNarration(script, scenes, targetDuration, apiKey) {
+  const prompt = 'You are a movie recap editor. Match Burmese narration paragraphs to the most relevant candidate scenes using only the supplied frame descriptions and timestamps. Select scenes in a coherent order; do not invent scenes. Return JSON only: {"selections":[{"sceneIndex":0,"narration":"exact matching short narration paragraph","reason":"brief reason","start":0,"end":5}]}. Scene indices refer to candidate scene index. Keep each clip 3-12 seconds when possible, never overlap clips, and target total duration about ' + targetDuration + ' seconds. If scene evidence is insufficient, say so in reason.\nNARRATION:\n' + script.slice(0, 18000) + '\nCANDIDATE SCENES:\n' + JSON.stringify(scenes).slice(0, 24000);
+  const response = await gemini(apiKey).models.generateContent({
+    model: process.env.GEMINI_VISION_MODEL || process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+    contents: prompt,
+    config: { responseMimeType: 'application/json', temperature: 0.2 }
+  });
+  const raw = response.text || '{}';
+  try { return JSON.parse(raw); } catch {
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (match) return JSON.parse(match[0]);
+    throw new Error('Gemini က Scene Timeline JSON အဖြေမပြန်ပါ။');
+  }
+}
