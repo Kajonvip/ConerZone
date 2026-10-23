@@ -34,3 +34,8 @@
 .inline-preview .preview-controls label{font-size:10px}
 .inline-preview .preview-controls input{min-width:50px;width:90px}
 .inline-preview .subtitle-overlay{font-size:clamp(12px,2vw,20px)!important;max-width:92%}
+
+/* Safer mobile video mounting: do not initialize the video decoder until requested */
+.safe-preview-start{position:absolute;inset:0;width:100%;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:22px;border:0;background:#101018;color:#c4b7ff;text-align:center;z-index:2}
+.safe-preview-start b{font-size:13px;color:#f0ecfa}
+.safe-preview-start span{max-width:280px;font-size:10px;line-height:1.7;color:#918aa5}
