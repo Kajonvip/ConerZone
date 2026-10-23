@@ -123,8 +123,17 @@ function App() {
       <div className="workspace">
         <aside className="panel sidebar">
           <div className="section-title"><Upload size={17}/><h2>၁။ Video တင်ရန်</h2></div>
-          <button className="upload-zone" onClick={()=>fileRef.current?.click()}><FileVideo size={28}/><b>{video?'Video ပြောင်းရွေးရန်':'Video Upload'}</b><span>MP4 · MOV · WEBM · MKV</span><small>ဖိုင်ရွေးပြီးတာနဲ့ အောက်က player ထဲမှာပဲ ပေါ်ပါမယ်</small></button>
+          {!video && <button className="upload-zone" onClick={()=>fileRef.current?.click()}><FileVideo size={28}/><b>Video Upload</b><span>MP4 · MOV · WEBM · MKV</span><small>ဖိုင်ရွေးရန် နှိပ်ပါ</small></button>}
           <input ref={fileRef} hidden type="file" accept="video/*,.mkv" onChange={e=>uploadFile(e.target.files?.[0])}/>
+          {video && <div className="inline-preview">
+            <div className="inline-preview-head"><b>Video Preview</b><button className="text-btn" onClick={()=>fileRef.current?.click()}>ပြောင်းရွေးရန်</button></div>
+            <div ref={stageRef} className="video-stage" onPointerMove={moveSubtitle} onPointerUp={()=>{dragRef.current=false;}} onPointerCancel={()=>{dragRef.current=false;}}>
+              <video ref={videoRef} key={video.src} src={video.src} controls playsInline preload="metadata" onLoadedMetadata={e=>setVideo(old=>old?{...old,duration:e.currentTarget.duration}:old)} onError={()=>setStatus('Preview မဖွင့်နိုင်ပါ။ File format သို့မဟုတ် URL ကို စစ်ပါ။')}/>
+              {active && <div className="subtitle-overlay" style={{left:active.x+'%',top:active.y+'%',fontSize:fontSize+'px',backdropFilter:'blur('+blur+'px)',WebkitBackdropFilter:'blur('+blur+'px)',background:'rgba(0,0,0,'+(bgOpacity/100)+')',borderRadius:borderRadius+'px'}} onPointerDown={e=>{e.preventDefault();dragRef.current=true;e.currentTarget.setPointerCapture(e.pointerId);}}>{active.text}</div>}
+            </div>
+            <div className="preview-controls"><label><Volume2 size={16}/> အသံအတိုးအချဲ့ <input type="range" min="0" max="1" step="0.05" value={volume} onChange={e=>setVolume(Number(e.target.value))}/><b>{Math.round(volume*100)}%</b></label></div>
+            <div className="preview-foot"><span>{video.name}</span><span>{video.duration?Math.round(video.duration)+' sec':''}</span></div>
+          </div>}
           <div className="or">OR VIDEO URL</div><div className="url-field"><LinkIcon size={16}/><input value={url} onChange={e=>setUrl(e.target.value)} placeholder="Direct .mp4 URL"/></div>
           <button className="secondary-btn full" disabled={!url.trim()} onClick={importUrl}>URL Preview ပြမယ်</button>
           <div className="divider"/>
@@ -135,15 +144,6 @@ function App() {
           <div className="tiny-note">လက်ရှိ Groq က ပေးထားသော plot notes ကို အခြေခံပြီး script ရေးပေးပါတယ်။</div>
         </aside>
         <section className="editor-column">
-          <div className="panel">
-            <div className="panel-heading"><div className="section-title"><Film size={17}/><h2>Video Preview & စာတန်းထိုး</h2></div><span className="live-tag">IN-PLACE PREVIEW</span></div>
-            <div ref={stageRef} className="video-stage" onPointerMove={moveSubtitle} onPointerUp={()=>{dragRef.current=false;}} onPointerCancel={()=>{dragRef.current=false;}}>
-              {video?<video ref={videoRef} key={video.src} src={video.src} controls playsInline preload="metadata" onLoadedMetadata={e=>setVideo(old=>old?{...old,duration:e.currentTarget.duration}:old)} onError={()=>setStatus('Preview မဖွင့်နိုင်ပါ။ File format သို့မဟုတ် URL ကို စစ်ပါ။')} />:<button className="empty-preview" onClick={()=>fileRef.current?.click()}><Film size={38}/><b>ဒီနေရာမှာ Video ပေါ်ပါမယ်</b><span>Video Upload ကို နှိပ်ပါ</span></button>}
-              {video&&active&&<div className="subtitle-overlay" style={{left:active.x+'%',top:active.y+'%',fontSize:fontSize+'px',backdropFilter:'blur('+blur+'px)',WebkitBackdropFilter:'blur('+blur+'px)',background:'rgba(0,0,0,'+(bgOpacity/100)+')',borderRadius:borderRadius+'px'}} onPointerDown={e=>{e.preventDefault();dragRef.current=true;e.currentTarget.setPointerCapture(e.pointerId);}}>{active.text}</div>}
-            </div>
-            {video&&<div className="preview-controls"><label><Volume2 size={16}/> အသံအတိုးအချဲ့ <input type="range" min="0" max="1" step="0.05" value={volume} onChange={e=>setVolume(Number(e.target.value))}/><b>{Math.round(volume*100)}%</b></label><button className="secondary-btn" onClick={()=>fileRef.current?.click()}><Upload size={14}/> Video ပြောင်းရန်</button></div>}
-            <div className="preview-foot"><span>{video?video.name:'Video မတင်ရသေးပါ'}</span><span>{video?.duration?Math.round(video.duration)+' sec':''}</span></div>
-          </div>
           <div className="panel">
             <div className="panel-heading"><div className="section-title"><Mic2 size={17}/><h2>၃။ Recap အသံရွေးချယ်ရန်</h2></div></div>
             <label>အသံအမျိုးအစား</label><div className="option-row"><button className={voiceGender==='male'?'choice active':'choice'} onClick={()=>setVoiceGender('male')}>ယောက်ျားအသံ</button><button className={voiceGender==='female'?'choice active':'choice'} onClick={()=>setVoiceGender('female')}>မိန်းမအသံ</button><button className={voiceGender==='auto'?'choice active':'choice'} onClick={()=>setVoiceGender('auto')}>Auto</button></div>
